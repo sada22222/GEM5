@@ -1,0 +1,40 @@
++ set -x
++ hostname
+node004.bosccluster.com
++ cd
++ test -f completed
++ rm -f abort
++ rm -f completed
++ touch running
++++ readlink -f -- /usr/bin/bash
+++ dirname -- /usr/bin/bash
++ script_dir=/usr/bin
++ bash /nfs/home/hujun/GEM5/util/xs_scripts/kmh_6wide_vector_cmp.sh /nfs/home/hujun/GEM5/util/xs_scripts/simpledram/specall/gcc_typeck_0
+Using gem5 binary: /nfs/home/hujun/GEM5/build/RISCV/gem5.opt
+$GCBV_REF_SO environment variable is "/nfs/home/zhaozhi/workspace/NEMU/build/riscv64-nemu-interpreter-so"
+$GCBV_RESTORER environment variable is ""
+$gem5_home environment variable is "/nfs/home/hujun/GEM5"
+Global frequency set at 1000000000000 ticks per second
+warn: No dot file generated. Please install pydot to generate the dot file and pdf.
+build/RISCV/arch/riscv/bare_metal/fs_workload.cc:60: info: No bootload provided, because using XS GCPT, reset to 0x80000000
+build/RISCV/cpu/o3/issue_queue.cc:876: warn: No config for opClass: IprAccess
+build/RISCV/cpu/o3/issue_queue.cc:876: warn: No config for opClass: InstPrefetch
+build/RISCV/cpu/base.cc:216: warn: cpu_id set to 0
+Using /nfs/home/zhaozhi/workspace/NEMU/build/riscv64-nemu-interpreter-so for difftest
+build/RISCV/cpu/base.cc:230: warn: Difftest is enabled with ref so: /nfs/home/zhaozhi/workspace/NEMU/build/riscv64-nemu-interpreter-so.
+build/RISCV/base/stats/storage.hh:279: warn: Bucket size (20) does not divide range [1:500] into equal-sized buckets. Rounding up.
+build/RISCV/base/stats/storage.hh:279: warn: Bucket size (20) does not divide range [1:500] into equal-sized buckets. Rounding up.
+build/RISCV/cpu/o3/cpu.cc:237: warn: Setting isa ptr of cpu to 0x626768a84b40
+build/RISCV/base/remote_gdb.cc:381: warn: Sockets disabled, not accepting gdb connections
+build/RISCV/mem/physical.cc:509: warn: Unserializing physical memory from file /nfs/home/hujun/GEM5/util/xs_scripts/simpledram/specall/gcc_typeck_0
+build/RISCV/mem/physical.cc:518: panic: panic condition sz != 2 occurred: Couldn't read magic bytes from object file
+Memory Usage: 18232912 KBytes
+Program aborted at tick 0
+/nfs/home/hujun/GEM5/util/xs_scripts/kmh_6wide_vector_cmp.sh: line 10: 2447125 Aborted                 (core dumped) $gem5 $gem5_home/configs/example/xiangshan.py --no-pf --no-l3cache --kmh-align --mem-type=SimpleMemory --generic-rv-cpt=$1 --restore-rvv-cpt
++ check 134
++ '[' 134 -ne 0 ']'
++ echo FAIL
+FAIL
++ rm running
++ touch abort
++ exit

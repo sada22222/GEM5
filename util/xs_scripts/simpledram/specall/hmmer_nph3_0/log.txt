@@ -1,0 +1,223 @@
++ set -x
++ hostname
+node004.bosccluster.com
++ cd /nfs/home/hujun/GEM5/util/xs_scripts/simpledram/specall/hmmer_nph3_0
++ test -f completed
++ rm -f abort
++ rm -f completed
++ touch running
++++ readlink -f -- /usr/bin/bash
+++ dirname -- /usr/bin/bash
++ script_dir=/usr/bin
++ bash /nfs/home/hujun/GEM5/util/xs_scripts/kmh_6wide_vector_cmp.sh /nfs/home/hujun/spec06_gcc15_rv64gcbv_base_seg0_ff0_zbs1_autovec_NEMU__full/checkpoint-0-0-0/hmmer_nph3/0/_0_0.000068_.zstd
+Using gem5 binary: /nfs/home/hujun/GEM5/build/RISCV/gem5.opt
+$GCBV_REF_SO environment variable is "/nfs/home/zhaozhi/workspace/NEMU/build/riscv64-nemu-interpreter-so"
+$GCBV_RESTORER environment variable is ""
+$gem5_home environment variable is "/nfs/home/hujun/GEM5"
+Global frequency set at 1000000000000 ticks per second
+warn: No dot file generated. Please install pydot to generate the dot file and pdf.
+build/RISCV/arch/riscv/bare_metal/fs_workload.cc:60: info: No bootload provided, because using XS GCPT, reset to 0x80000000
+build/RISCV/cpu/o3/issue_queue.cc:876: warn: No config for opClass: IprAccess
+build/RISCV/cpu/o3/issue_queue.cc:876: warn: No config for opClass: InstPrefetch
+build/RISCV/cpu/base.cc:216: warn: cpu_id set to 0
+Using /nfs/home/zhaozhi/workspace/NEMU/build/riscv64-nemu-interpreter-so for difftest
+build/RISCV/cpu/base.cc:230: warn: Difftest is enabled with ref so: /nfs/home/zhaozhi/workspace/NEMU/build/riscv64-nemu-interpreter-so.
+build/RISCV/base/stats/storage.hh:279: warn: Bucket size (20) does not divide range [1:500] into equal-sized buckets. Rounding up.
+build/RISCV/base/stats/storage.hh:279: warn: Bucket size (20) does not divide range [1:500] into equal-sized buckets. Rounding up.
+build/RISCV/cpu/o3/cpu.cc:237: warn: Setting isa ptr of cpu to 0x57eefa4a6b40
+build/RISCV/base/remote_gdb.cc:381: warn: Sockets disabled, not accepting gdb connections
+build/RISCV/mem/physical.cc:509: warn: Unserializing physical memory from file /nfs/home/hujun/spec06_gcc15_rv64gcbv_base_seg0_ff0_zbs1_autovec_NEMU__full/checkpoint-0-0-0/hmmer_nph3/0/_0_0.000068_.zstd
+build/RISCV/mem/physical.cc:766: warn: Read zstd file size 30391908
+build/RISCV/mem/physical.cc:830: warn: Total write non-zero bytes: 189740240
+build/RISCV/sim/system.cc:561: info: Restored from Xiangshan RISC-V Checkpoint
+gem5 Simulator System.  https://www.gem5.org
+gem5 is copyrighted software; use the --copyright option for details.
+
+gem5 version [DEVELOP-FOR-22.1]
+gem5 compiled Sep  3 2025 10:56:00
+gem5 started Sep  3 2025 13:26:47
+gem5 executing on node004.bosccluster.com, pid 2539083
+command line: /nfs/home/hujun/GEM5/build/RISCV/gem5.opt /nfs/home/hujun/GEM5/configs/example/xiangshan.py --no-pf --no-l3cache --kmh-align --mem-type=SimpleMemory --generic-rv-cpt=/nfs/home/hujun/spec06_gcc15_rv64gcbv_base_seg0_ff0_zbs1_autovec_NEMU__full/checkpoint-0-0-0/hmmer_nph3/0/_0_0.000068_.zstd --restore-rvv-cpt
+
+info: Standard input is not a terminal, disabling listeners.
+[<m5.params.AddrRange object at 0x71e9ac08f850>]
+Obtained ref_so from GCBV_REF_SO:  /nfs/home/zhaozhi/workspace/NEMU/build/riscv64-nemu-interpreter-so
+Obtained gcpt_restorer from GCBV_RESTORER:  
+Simulating single core with RVV, demanding GCPT restorer size of 0x1000.
+loop predictor and loop buffer not supported for DecoupledBPUWithBTB
+Attach 1 decoders to thread with addr: <orphan System>.cpu.decoder
+Create threads for test sys cpu (XiangshanCore)
+Finish memory system configuration
+No switch cpu_class provided
+Registering probe listeners for BaseO3CPU system.cpu
+**** REAL SIMULATION ****
+build/RISCV/sim/simulate.cc:194: info: Entering event queue @ 0.  Starting simulation...
+build/RISCV/cpu/base.cc:1498: warn: MemDedup disabled, copying pmem to NEMU
+build/RISCV/cpu/base.cc:1499: warn: Start memcpy to NEMU from 0x71e7abe00000, size=8589934592
+build/RISCV/cpu/base.cc:1502: warn: Start regcpy to NEMU
+build/RISCV/cpu/base.cc:1176: warn: Inst [sn:228150] pc: 0x801004f8
+build/RISCV/cpu/base.cc:1177: warn: Diff at [31mmepc[0m Ref value: [31m0x3f80ff4536[0m, GEM5 value: [31m0xffffffff8015c85c[0m
+build/RISCV/cpu/base.cc:1398: warn: Src0 tp = 0
+build/RISCV/cpu/base.cc:1413: warn: Inst src count: 1, dest count: 1
+build/RISCV/cpu/base.cc:1454: warn: Inst [sn:228150]
+Diff at PC, NEMU: 0xffffffff8015c85c, GEM5: 0x801004f8
+GEM5 pc: 0x801004f8, NEMU npc: 0xffffffff8015c860
+Diff at [31mmstatus[0m Ref value: [31m0xa000000a0[0m, GEM5 value: [31m0xa00000820[0m
+Diff at [31mpriv[0m Ref value: [31m0x1[0m, GEM5 value: [31m0x3[0m
+Diff at [31mmcause[0m Ref value: [31m0x9[0m, GEM5 value: [31m0x2[0m
+Inst [sn:228150] pc: 0x801004f8
+Diff at [31mtp[0m Ref value: [31m0xffffffd880140a00[0m, GEM5 value: [31m0x80148000[0m
+In CPU0: NEMU PC: 0xffffffff8015c85c, GEM5 PC: 0x801004f8, inst: csrrw tp, mscratch, tp
+---------------- Intger Registers ----------------
+  $0: 0x0000000000000000   ra: 0xffffffff80190c94   sp: 0xffffffc8002cbd20   gp: 0xffffffff8423b630 
+  tp: 0xffffffd880140a00   t0: 0x0000000000000000   t1: 0x0000000000000128   t2: 0x0000000000000002 
+  s0: 0xffffffff8422d208   s1: 0x0000000000000004   a0: 0x0000000000000000   a1: 0x0000000000000002 
+  a2: 0x0000000000000000   a3: 0xffffffff84254978   a4: 0xffffffd9f8ff2280   a5: 0xffffffff8015c85c 
+  a6: 0xffffffda7523a000   a7: 0x0000000200000022   s2: 0xffffffff8422d200   s3: 0xffffffff8422d208 
+  s4: 0xffffffd880140a00   s5: 0xffffffff84254978   s6: 0x0000000000000002   s7: 0xffffffd880120000 
+  s8: 0x0000003f811175f0   s9: 0x0000003f8112d99e  s10: 0x0000000000000001  s11: 0x0000003f81118dc0 
+  t3: 0x000000000000000e   t4: 0x0000000000011000   t5: 0xffffffd880054e0c   t6: 0xffffffd884217098 
+---------------- Float Registers ----------------
+ ft0: 0x0000000000000000  ft1: 0x0000000000000000  ft2: 0x0000000000000000  ft3: 0x0000000000000000 
+ ft4: 0x0000000000000000  ft5: 0x0000000000000000  ft6: 0x0000000000000000  ft7: 0x0000000000000000 
+ fs0: 0x0000000000000000  fs1: 0x0000000000000000  fa0: 0x0000000000000000  fa1: 0x0000000000000000 
+ fa2: 0x0000000000000000  fa3: 0x0000000000000000  fa4: 0x0000000000000000  fa5: 0x0000000000000000 
+ fa6: 0x0000000000000000  fa7: 0x0000000000000000  fs2: 0x0000000000000000  fs3: 0x0000000000000000 
+ fs4: 0x0000000000000000  fs5: 0x0000000000000000  fs6: 0x0000000000000000  fs7: 0x0000000000000000 
+ fs8: 0x0000000000000000  fs9: 0x0000000000000000 fs10: 0x0000000000000000 fs11: 0x0000000000000000 
+ ft8: 0x0000000000000000  ft9: 0x0000000000000000 ft10: 0x0000000000000000 ft11: 0x0000000000000000 
+ fcsr: 0x0000000000000000 fflags: 0x0000000000000000 frm: 0x0000000000000000
+---------------- Privileged CSRs ----------------
+pc: 0xffffffff8015c860  privilege mode: S (mode: 1  v: 0  debug: 0)
+   mstatus: 0x0000000a000000a0   sstatus: 0x0000000200000020  vsstatus: 0x0000000200000000
+   hstatus: 0x0000000200000000
+    mcause: 0x0000000000000009      mepc: 0x0000003f80ff4536     mtval: 0x0000000000000000
+    scause: 0x0000000000000008      sepc: 0x0000003f8105f444     stval: 0x0000000000000000
+   vscause: 0x0000000000000000     vsepc: 0x0000000000000000    vstval: 0x0000000000000000
+    mtval2: 0x0000000000000000     htval: 0x0000000000000000
+    mtinst: 0x0000000000000000    htinst: 0x0000000000000000
+  mscratch: 0x0000000080148000  sscratch: 0x0000000000000000 vsscratch: 0x0000000000000000
+     mtvec: 0x00000000801004f8     stvec: 0xffffffff801973c4    vstvec: 0x0000000000000000
+       mip: 0x0000000000000000       mie: 0x000000000000022a
+   mideleg: 0x0000000000001666   medeleg: 0x0000000000f0b509
+   hideleg: 0x0000000000000000   hedeleg: 0x0000000000000000
+      satp: 0x8000c00000104239     hgatp: 0x0000000000000000     vsatp: 0x0000000000000000
+ mcounteren: 0x00000000ffffffff scounteren: 0x0000000000000007 hcounteren: 0x0000000000000000
+---------------- PMP CSRs ----------------
+pmp: 16 entries active, details:
+ 0: cfg:0x18 addr:0x000000000e001fff| 1: cfg:0x18 addr:0x0000000020053fff
+ 2: cfg:0x18 addr:0x0000000020047fff| 3: cfg:0x1b addr:0x000000000f7fffff
+ 4: cfg:0x1f addr:0x00000003ffffffff| 5: cfg:0x00 addr:0x0000000000000000
+ 6: cfg:0x00 addr:0x0000000000000000| 7: cfg:0x00 addr:0x0000000000000000
+ 8: cfg:0x00 addr:0x0000000000000000| 9: cfg:0x00 addr:0x0000000000000000
+10: cfg:0x00 addr:0x0000000000000000|11: cfg:0x00 addr:0x0000000000000000
+12: cfg:0x00 addr:0x0000000000000000|13: cfg:0x00 addr:0x0000000000000000
+14: cfg:0x00 addr:0x0000000000000000|15: cfg:0x00 addr:0x0000000000000000
+---------------- PMA CSRs ----------------
+pma: 16 entries active, details:
+ 0: cfg:0x00 addr:0x0000000000000000| 1: cfg:0x00 addr:0x0000000000000000
+ 2: cfg:0x00 addr:0x0000000000000000| 3: cfg:0x0b addr:0x0000000004000000
+ 4: cfg:0x0f addr:0x0000000008000000| 5: cfg:0x0b addr:0x000000000c004000
+ 6: cfg:0x0b addr:0x000000000c014000| 7: cfg:0x0b addr:0x000000000e008000
+ 8: cfg:0x0f addr:0x000000000e008400| 9: cfg:0x0b addr:0x000000000e008800
+10: cfg:0x0b addr:0x000000000e400000|11: cfg:0x0b addr:0x000000000e400800
+12: cfg:0x08 addr:0x000000000e800000|13: cfg:0x0b addr:0x0000000020000000
+14: cfg:0x6f addr:0x0000020000000000|15: cfg:0x18 addr:0x00001fffffffffff
+---------------- Vector Registers ----------------
+v0 : 0xffffffffffffffff_ffffffffffffffff  v1 : 0xffffffffffffffff_ffffffffffffffff  
+v2 : 0xffffffffffffffff_ffffffffffffffff  v3 : 0xffffffffffffffff_ffffffffffffffff  
+v4 : 0xffffffffffffffff_ffffffffffffffff  v5 : 0xffffffffffffffff_ffffffffffffffff  
+v6 : 0xffffffffffffffff_ffffffffffffffff  v7 : 0xffffffffffffffff_ffffffffffffffff  
+v8 : 0xffffffffffffffff_ffffffffffffffff  v9 : 0xffffffffffffffff_ffffffffffffffff  
+v10: 0xffffffffffffffff_ffffffffffffffff  v11: 0xffffffffffffffff_ffffffffffffffff  
+v12: 0xffffffffffffffff_ffffffffffffffff  v13: 0xffffffffffffffff_ffffffffffffffff  
+v14: 0xffffffffffffffff_ffffffffffffffff  v15: 0xffffffffffffffff_ffffffffffffffff  
+v16: 0xffffffffffffffff_ffffffffffffffff  v17: 0xffffffffffffffff_ffffffffffffffff  
+v18: 0xffffffffffffffff_ffffffffffffffff  v19: 0xffffffffffffffff_ffffffffffffffff  
+v20: 0xffffffffffffffff_ffffffffffffffff  v21: 0xffffffffffffffff_ffffffffffffffff  
+v22: 0xffffffffffffffff_ffffffffffffffff  v23: 0xffffffffffffffff_ffffffffffffffff  
+v24: 0xffffffffffffffff_ffffffffffffffff  v25: 0xffffffffffffffff_ffffffffffffffff  
+v26: 0xffffffffffffffff_ffffffffffffffff  v27: 0xffffffffffffffff_ffffffffffffffff  
+v28: 0xffffffffffffffff_ffffffffffffffff  v29: 0xffffffffffffffff_ffffffffffffffff  
+v30: 0xffffffffffffffff_ffffffffffffffff  v31: 0xffffffffffffffff_ffffffffffffffff  
+  vtype: 0x8000000000000000 vstart: 0x0000000000000000  vxsat: 0x0000000000000000
+   vxrm: 0x0000000000000000     vl: 0x0000000000000000   vcsr: 0x0000000000000000
+build/RISCV/cpu/base.cc:1554: warn: gem5-rRegsDisplay : 
+  $0 :                0   ra : ffffffff80190c94   sp : ffffffc8002cbd20   gp : ffffffff8423b630 
+[31m  tp :         80148000 [0m  t0 :                0   t1 :              128   t2 :                2 
+  s0 : ffffffff8422d208   s1 :                4   a0 :                0   a1 :                2 
+  a2 :                0   a3 : ffffffff84254978   a4 : ffffffd9f8ff2280   a5 : ffffffff8015c85c 
+  a6 : ffffffda7523a000   a7 :        200000022   s2 : ffffffff8422d200   s3 : ffffffff8422d208 
+  s4 : ffffffd880140a00   s5 : ffffffff84254978   s6 :                2   s7 : ffffffd880120000 
+  s8 :       3f811175f0   s9 :       3f8112d99e  s10 :                1  s11 :       3f81118dc0 
+  t3 :                e   t4 :            11000   t5 : ffffffd880054e0c   t6 : ffffffd884217098 
+build/RISCV/cpu/base.cc:1567: warn: gem5-fRegsDisplay : 
+ ft0 :                0  ft1 :                0  ft2 :                0  ft3 :                0 
+ ft4 :                0  ft5 :                0  ft6 :                0  ft7 :                0 
+ fs0 :                0  fs1 :                0  fa0 :                0  fa1 :                0 
+ fa2 :                0  fa3 :                0  fa4 :                0  fa5 :                0 
+ fa6 :                0  fa7 :                0  fs2 :                0  fs3 :                0 
+ fs4 :                0  fs5 :                0  fs6 :                0  fs7 :                0 
+ fs8 :                0  fs9 :                0 fs10 :                0 fs11 :                0 
+ ft8 :                0  ft9 :                0 ft10 :                0 ft11 :                0 
+build/RISCV/cpu/base.cc:1618: warn: gem5-CsrDisplay : 
+pc :         801004f8      [31mmstatus :        a00000820[0m [31mmcause :                2[0m [31mmepc    : ffffffff8015c85c[0m
+			   sstatus :        200000000 scause :                8 sepc    :                0
+satp    : 8000c00000104239
+mip     :                0 mie     :              22a mscratch:                0 sscratch:                0
+mideleg :             1444 medeleg :                0
+mtval   :                0 stval   :                0 mtvec   :                0 stvec   :                0
+privilege mode : 3
+build/RISCV/cpu/base.cc:1643: warn: gem5-VectorDisplay : 
+v00 : ffffffffffffffff_ffffffffffffffff	v01 : ffffffffffffffff_ffffffffffffffff	
+v02 : ffffffffffffffff_ffffffffffffffff	v03 : ffffffffffffffff_ffffffffffffffff	
+v04 : ffffffffffffffff_ffffffffffffffff	v05 : ffffffffffffffff_ffffffffffffffff	
+v06 : ffffffffffffffff_ffffffffffffffff	v07 : ffffffffffffffff_ffffffffffffffff	
+v08 : ffffffffffffffff_ffffffffffffffff	v09 : ffffffffffffffff_ffffffffffffffff	
+v10 : ffffffffffffffff_ffffffffffffffff	v11 : ffffffffffffffff_ffffffffffffffff	
+v12 : ffffffffffffffff_ffffffffffffffff	v13 : ffffffffffffffff_ffffffffffffffff	
+v14 : ffffffffffffffff_ffffffffffffffff	v15 : ffffffffffffffff_ffffffffffffffff	
+v16 : ffffffffffffffff_ffffffffffffffff	v17 : ffffffffffffffff_ffffffffffffffff	
+v18 : ffffffffffffffff_ffffffffffffffff	v19 : ffffffffffffffff_ffffffffffffffff	
+v20 : ffffffffffffffff_ffffffffffffffff	v21 : ffffffffffffffff_ffffffffffffffff	
+v22 : ffffffffffffffff_ffffffffffffffff	v23 : ffffffffffffffff_ffffffffffffffff	
+v24 : ffffffffffffffff_ffffffffffffffff	v25 : ffffffffffffffff_ffffffffffffffff	
+v26 : ffffffffffffffff_ffffffffffffffff	v27 : ffffffffffffffff_ffffffffffffffff	
+v28 : ffffffffffffffff_ffffffffffffffff	v29 : ffffffffffffffff_ffffffffffffffff	
+v30 : ffffffffffffffff_ffffffffffffffff	v31 : ffffffffffffffff_ffffffffffffffff	
+vtype   : 8000000000000000 vstart   :                0  vxsat   :                0
+vxrm    :                0 vl       :                0  vcsr    :                0
+
+
+build/RISCV/cpu/base.cc:1457: warn: start dump last 20 committed msg
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227888 pc:0xffffffff80069466] jalr ra, 2046(ra), res: 0xffffffff8006946a
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227926 pc:0xffffffff80190c60] c_addi16sp sp, -48, res: 0xffffffc8002cbd20
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227927 pc:0xffffffff80190c62] c_sdsp s2, 16(sp), paddr: 0x10422ad30
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227928 pc:0xffffffff80190c64] c_sdsp s3, 8(sp), paddr: 0x10422ad28
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227929 pc:0xffffffff80190c66] lui s2, 541229, res: 0xffffffff8422d000
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227930 pc:0xffffffff80190c6a] lui s3, 541229, res: 0xffffffff8422d000
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227931 pc:0xffffffff80190c6e] c_sdsp ra, 40(sp), paddr: 0x10422ad48
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227932 pc:0xffffffff80190c70] c_sdsp s0, 32(sp), paddr: 0x10422ad40
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227933 pc:0xffffffff80190c72] c_sdsp s1, 24(sp), paddr: 0x10422ad38
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227934 pc:0xffffffff80190c74] addi s2, s2, 512, res: 0xffffffff8422d200
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227935 pc:0xffffffff80190c78] addi s3, s3, 520, res: 0xffffffff8422d208
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227936 pc:0xffffffff80190c7c] lw s1, 0(s2), res: 0x4, paddr: 0x84a2d200
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227937 pc:0xffffffff80190c80] c_addiw s1, 0, res: 0x4
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227938 pc:0xffffffff80190c82] slli a5, s1, 63, res: 0
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227939 pc:0xffffffff80190c86] srai s0, a5, 63, res: 0
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227940 pc:0xffffffff80190c8a] andi s0, s0, 40, res: 0
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227941 pc:0xffffffff80190c8e] c_add s0, s3, res: 0xffffffff8422d208
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227942 pc:0xffffffff80190c90] c_ld a5, 24(s0), res: 0xffffffff8015c85c, paddr: 0x84a2d220
+build/RISCV/cpu/base.cc:1460: warn: V [sn:227943 pc:0xffffffff80190c92] c_jalr a5, res: 0xffffffff80190c94
+build/RISCV/cpu/base.cc:1460: warn: V [sn:228150 pc:0x801004f8] csrrw tp, mscratch, tp, res: 0x80148000
+build/RISCV/cpu/base.cc:1526: panic: Difftest failed!
+Memory Usage: 18263620 KBytes
+Program aborted at tick 91296612
+/nfs/home/hujun/GEM5/util/xs_scripts/kmh_6wide_vector_cmp.sh: line 10: 2539083 Aborted                 (core dumped) $gem5 $gem5_home/configs/example/xiangshan.py --no-pf --no-l3cache --kmh-align --mem-type=SimpleMemory --generic-rv-cpt=$1 --restore-rvv-cpt
++ check 134
++ '[' 134 -ne 0 ']'
++ echo FAIL
+FAIL
++ rm running
++ touch abort
++ exit

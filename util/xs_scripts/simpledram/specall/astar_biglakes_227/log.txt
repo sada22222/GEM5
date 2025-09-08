@@ -1,0 +1,64 @@
++ set -x
++ hostname
+node004.bosccluster.com
++ cd /nfs/home/hujun/GEM5/util/xs_scripts/simpledram/specall/astar_biglakes_227
++ test -f completed
++ rm -f abort
++ rm -f completed
++ touch running
++++ readlink -f -- /usr/bin/bash
+++ dirname -- /usr/bin/bash
++ script_dir=/usr/bin
++ bash /nfs/home/hujun/GEM5/util/xs_scripts/kmh_6wide_vector_cmp.sh /nfs/home/hujun/spec06_gcc15_rv64gcbv_base_seg0_ff0_zbs1_autovec_NEMU__full/checkpoint-0-0-0/astar_biglakes/227/_227_0.011659_.zstd
+Using gem5 binary: /nfs/home/hujun/GEM5/build/RISCV/gem5.opt
+$GCBV_REF_SO environment variable is "/nfs/home/zhaozhi/workspace/NEMU/build/riscv64-nemu-interpreter-so"
+$GCBV_RESTORER environment variable is ""
+$gem5_home environment variable is "/nfs/home/hujun/GEM5"
+Global frequency set at 1000000000000 ticks per second
+warn: No dot file generated. Please install pydot to generate the dot file and pdf.
+build/RISCV/arch/riscv/bare_metal/fs_workload.cc:60: info: No bootload provided, because using XS GCPT, reset to 0x80000000
+build/RISCV/cpu/o3/issue_queue.cc:876: warn: No config for opClass: IprAccess
+build/RISCV/cpu/o3/issue_queue.cc:876: warn: No config for opClass: InstPrefetch
+build/RISCV/cpu/base.cc:216: warn: cpu_id set to 0
+Using /nfs/home/zhaozhi/workspace/NEMU/build/riscv64-nemu-interpreter-so for difftest
+build/RISCV/cpu/base.cc:230: warn: Difftest is enabled with ref so: /nfs/home/zhaozhi/workspace/NEMU/build/riscv64-nemu-interpreter-so.
+build/RISCV/base/stats/storage.hh:279: warn: Bucket size (20) does not divide range [1:500] into equal-sized buckets. Rounding up.
+build/RISCV/base/stats/storage.hh:279: warn: Bucket size (20) does not divide range [1:500] into equal-sized buckets. Rounding up.
+build/RISCV/cpu/o3/cpu.cc:237: warn: Setting isa ptr of cpu to 0x5fa992a08b40
+build/RISCV/base/remote_gdb.cc:381: warn: Sockets disabled, not accepting gdb connections
+build/RISCV/mem/physical.cc:509: warn: Unserializing physical memory from file /nfs/home/hujun/spec06_gcc15_rv64gcbv_base_seg0_ff0_zbs1_autovec_NEMU__full/checkpoint-0-0-0/astar_biglakes/227/_227_0.011659_.zstd
+build/RISCV/mem/physical.cc:766: warn: Read zstd file size 32041490
+build/RISCV/mem/physical.cc:830: warn: Total write non-zero bytes: 215236152
+build/RISCV/sim/system.cc:561: info: Restored from Xiangshan RISC-V Checkpoint
+gem5 Simulator System.  https://www.gem5.org
+gem5 is copyrighted software; use the --copyright option for details.
+
+gem5 version [DEVELOP-FOR-22.1]
+gem5 compiled Sep  3 2025 10:56:00
+gem5 started Sep  3 2025 12:21:10
+gem5 executing on node004.bosccluster.com, pid 2467190
+command line: /nfs/home/hujun/GEM5/build/RISCV/gem5.opt /nfs/home/hujun/GEM5/configs/example/xiangshan.py --no-pf --no-l3cache --kmh-align --mem-type=SimpleMemory --generic-rv-cpt=/nfs/home/hujun/spec06_gcc15_rv64gcbv_base_seg0_ff0_zbs1_autovec_NEMU__full/checkpoint-0-0-0/astar_biglakes/227/_227_0.011659_.zstd --restore-rvv-cpt
+
+info: Standard input is not a terminal, disabling listeners.
+[<m5.params.AddrRange object at 0x73bec298b850>]
+Obtained ref_so from GCBV_REF_SO:  /nfs/home/zhaozhi/workspace/NEMU/build/riscv64-nemu-interpreter-so
+Obtained gcpt_restorer from GCBV_RESTORER:  
+Simulating single core with RVV, demanding GCPT restorer size of 0x1000.
+loop predictor and loop buffer not supported for DecoupledBPUWithBTB
+Attach 1 decoders to thread with addr: <orphan System>.cpu.decoder
+Create threads for test sys cpu (XiangshanCore)
+Finish memory system configuration
+No switch cpu_class provided
+Registering probe listeners for BaseO3CPU system.cpu
+**** REAL SIMULATION ****
+build/RISCV/sim/simulate.cc:194: info: Entering event queue @ 0.  Starting simulation...
+build/RISCV/cpu/base.cc:1498: warn: MemDedup disabled, copying pmem to NEMU
+build/RISCV/cpu/base.cc:1499: warn: Start memcpy to NEMU from 0x73bcc2800000, size=8589934592
+build/RISCV/cpu/base.cc:1502: warn: Start regcpy to NEMU
+Will trigger stat dump and reset
+build/RISCV/sim/simulate.cc:194: info: Entering event queue @ 8431898328.  Starting simulation...
+Exiting @ tick 18192803319 because a thread reached the max instruction count
++ check 0
++ '[' 0 -ne 0 ']'
++ rm running
++ touch completed

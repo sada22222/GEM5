@@ -55,62 +55,67 @@ namespace gem5
 namespace o3
 {
 
+// ROB分配组策略 - 无压缩：每条指令分配一个组
 bool
 ROB::allocateGroup_none(const DynInstPtr inst, ThreadID tid)
 {
-    return true; // No group allocation needed
+    return true; // 不需要组分配
 }
 
+// ROB分配组策略 - 昆明湖V2：Load/Store/控制指令独占一个组
+// 用于ROB压缩，将多条指令打包成一个组以节省ROB项
 bool
 ROB::allocateGroup_kmhv2(const DynInstPtr inst, ThreadID tid)
 {
     auto& groups = threadGroups[tid];
     auto& prev = instList[tid].back();
 
-    // load/store/control exclusive one group
+    // Load/Store/控制指令独占一个组
     bool alloc = false;
     if (groups.empty()) [[unlikely]] {
         alloc = true;
     } else if (inst->isMemRef() || inst->isControl() || inst->isNonSpeculative()) {
-        alloc = true;
+        alloc = true;  // 当前指令是特殊指令，分配新组
     } else if (prev->isMemRef() || prev->isControl() ||
                prev->isNonSpeculative()) {
-        alloc = true;
+        alloc = true;  // 前一条指令是特殊指令，分配新组
     } else if (prev->ftqId != inst->ftqId) {
-        alloc = true;
+        alloc = true;  // 不同取指队列ID，分配新组
     } else if (lastInsertCycle != cpu->curCycle()) {
-        // different cycle
+        // 不同周期，分配新组
         alloc = true;
     } else if (groups.back() >= instsPerGroup) {
-        alloc = true;
+        alloc = true;  // 当前组已满，分配新组
     }
     return alloc;
 }
 
+// ROB分配组策略 - MohBoE：Load/Store在组头，控制指令在组尾
 bool
 ROB::allocateGroup_MohBoE(const DynInstPtr inst, ThreadID tid)
 {
     auto& groups = threadGroups[tid];
     auto& prev = instList[tid].back();
 
-    // load/store on group head
-    // control on group end
+    // Load/Store在组头
+    // 控制指令在组尾
     bool alloc = false;
     if (groups.empty()) [[unlikely]] {
         alloc = true;
     } else if (inst->isMemRef() || inst->isNonSpeculative()) {
-        alloc = true;
+        alloc = true;  // Load/Store分配新组
     } else if (prev->isControl()) {
-        alloc = true;
+        alloc = true;  // 前一条是控制指令，分配新组
     } else if (lastInsertCycle != cpu->curCycle()) {
-        // different cycle
+        // 不同周期，分配新组
         alloc = true;
     } else if (groups.back() >= instsPerGroup) {
-        alloc = true;
+        alloc = true;  // 当前组已满，分配新组
     }
     return alloc;
 }
 
+// ROB分配组策略 - 昆明湖V3：简化的分组策略
 bool
 ROB::allocateGroup_kmhv3(const DynInstPtr inst, ThreadID tid)
 {
@@ -121,14 +126,16 @@ ROB::allocateGroup_kmhv3(const DynInstPtr inst, ThreadID tid)
     if (groups.empty()) [[unlikely]] {
         alloc = true;
     } else if (lastInsertCycle != cpu->curCycle()) {
-        // different cycle
+        // 不同周期，分配新组
         alloc = true;
     } else if (groups.back() >= instsPerGroup) {
-        alloc = true;
+        alloc = true;  // 当前组已满，分配新组
     }
     return alloc;
 }
 
+// ROB构造函数：初始化ReOrder Buffer（重排序缓冲区）
+// ROB用于维护指令的程序顺序，支持乱序执行和顺序提交
 ROB::ROB(CPU *_cpu, const BaseO3CPUParams &params)
     : robPolicy(params.smtROBPolicy),
       robWalkPolicy(params.robWalkPolicy),
@@ -142,9 +149,9 @@ ROB::ROB(CPU *_cpu, const BaseO3CPUParams &params)
       numThreads(params.numThreads),
       stats(_cpu)
 {
-    //Figure out rob policy
+    //确定ROB策略
     if (robPolicy == SMTQueuePolicy::Dynamic) {
-        //Set Max Entries to Total ROB Capacity
+        //设置最大项数为ROB总容量
         for (ThreadID tid = 0; tid < numThreads; tid++) {
             maxEntries[tid] = numEntries;
         }
@@ -152,10 +159,10 @@ ROB::ROB(CPU *_cpu, const BaseO3CPUParams &params)
     } else if (robPolicy == SMTQueuePolicy::Partitioned) {
         DPRINTF(Fetch, "ROB sharing policy set to Partitioned\n");
 
-        //@todo:make work if part_amt doesnt divide evenly.
+        //@todo:如果part_amt不能整除，需要修正
         int part_amt = numEntries / numThreads;
 
-        //Divide ROB up evenly
+        //平均分配ROB
         for (ThreadID tid = 0; tid < numThreads; tid++) {
             maxEntries[tid] = part_amt;
         }
@@ -165,7 +172,7 @@ ROB::ROB(CPU *_cpu, const BaseO3CPUParams &params)
 
         int threshold =  params.smtROBThreshold;;
 
-        //Divide up by threshold amount
+        //按阈值分配
         for (ThreadID tid = 0; tid < numThreads; tid++) {
             maxEntries[tid] = threshold;
         }
@@ -182,6 +189,7 @@ ROB::ROB(CPU *_cpu, const BaseO3CPUParams &params)
         maxEntries[tid] = 0;
     }
 
+    // 根据ROB压缩策略选择分组函数
     switch(params.RobCompressPolicy) {
         case ROBCompressPolicy::none:
             allocateNewGroup = &ROB::allocateGroup_none;
@@ -204,6 +212,7 @@ ROB::ROB(CPU *_cpu, const BaseO3CPUParams &params)
     resetState();
 }
 
+// ROB重置状态：清空所有线程的ROB状态
 void
 ROB::resetState()
 {
@@ -215,18 +224,19 @@ ROB::resetState()
     }
     numInstsInROB = 0;
 
-    // Initialize the "universal" ROB head & tail point to invalid
-    // pointers
+    // 初始化"全局"ROB头尾指针为无效指针
     head = instList[0].end();
     tail = instList[0].end();
 }
 
+// ROB返回名称
 std::string
 ROB::name() const
 {
     return cpu->name() + ".rob";
 }
 
+// ROB设置活跃线程：设置活跃线程列表指针
 void
 ROB::setActiveThreads(std::list<ThreadID> *at_ptr)
 {
@@ -234,6 +244,7 @@ ROB::setActiveThreads(std::list<ThreadID> *at_ptr)
     activeThreads = at_ptr;
 }
 
+// ROB排空完整性检查：确保所有线程的指令列表为空
 void
 ROB::drainSanityCheck() const
 {
@@ -242,12 +253,14 @@ ROB::drainSanityCheck() const
     assert(isEmpty());
 }
 
+// ROB接管：从检查点恢复时重置状态
 void
 ROB::takeOverFrom()
 {
     resetState();
 }
 
+// ROB重置项数：根据活跃线程数重新分配ROB项
 void
 ROB::resetEntries()
 {
@@ -270,6 +283,7 @@ ROB::resetEntries()
     }
 }
 
+// ROB项数量：返回每个线程分配的ROB项数
 int
 ROB::entryAmount(ThreadID num_threads)
 {
@@ -280,6 +294,7 @@ ROB::entryAmount(ThreadID num_threads)
     }
 }
 
+// ROB统计指令数：统计所有线程的指令总数
 int
 ROB::countInsts()
 {
@@ -291,12 +306,14 @@ ROB::countInsts()
     return total;
 }
 
+// ROB统计指令数：返回指定线程的指令数
 size_t
 ROB::countInsts(ThreadID tid)
 {
     return instList[tid].size();
 }
 
+// ROB统计组内指令数：统计指定组数的指令总数
 uint32_t
 ROB::countInstsOfGroups(int groups)
 {
@@ -310,30 +327,33 @@ ROB::countInstsOfGroups(int groups)
     return sum;
 }
 
+// ROB提交组：提交指定线程的ROB头部组
 void
 ROB::commitGroup(const DynInstPtr inst, ThreadID tid)
 {
     assert(!threadGroups[tid].empty());
 
     if (threadGroups[tid].front() == 1) {
-        threadGroups[tid].pop_front();
+        threadGroups[tid].pop_front();  // 组内只有一条指令，删除整个组
     } else {
-        threadGroups[tid].front()--;
+        threadGroups[tid].front()--;    // 组内还有其他指令，减少计数
     }
 }
 
+// ROB清除组：清除指定线程的ROB尾部组（用于squash）
 void
 ROB::squashGroup(const DynInstPtr inst, ThreadID tid)
 {
     assert(!threadGroups[tid].empty());
 
     if (threadGroups[tid].back() == 1) {
-        threadGroups[tid].pop_back();
+        threadGroups[tid].pop_back();   // 组内只有一条指令，删除整个组
     } else {
-        threadGroups[tid].back()--;
+        threadGroups[tid].back()--;     // 组内还有其他指令，减少计数
     }
 }
 
+// ROB插入指令：将指令插入到ROB尾部
 void
 ROB::insertInst(const DynInstPtr &inst)
 {
@@ -347,29 +367,30 @@ ROB::insertInst(const DynInstPtr &inst)
 
     ThreadID tid = inst->threadNumber;
 
-    // allocate group
+    // 分配组
     bool alloc = (this->*allocateNewGroup)(inst, tid);
     lastInsertCycle = cpu->curCycle();
     if (alloc) {
+        // 分配新组
         if (!threadGroups[tid].empty()) [[likely]] {
             stats.instPergroup.sample(threadGroups[tid].back());
         }
         threadGroups[tid].push_back(1);
     } else {
+        // 添加到现有组
         assert(threadGroups[tid].back() < instsPerGroup);
         threadGroups[tid].back()++;
     }
 
     instList[tid].push_back(inst);
 
-    //Set Up head iterator if this is the 1st instruction in the ROB
+    //如果这是ROB中的第一条指令，设置head迭代器
     if (numInstsInROB == 0) {
         head = instList[tid].begin();
         assert((*head) == inst);
     }
 
-    //Must Decrement for iterator to actually be valid  since __.end()
-    //actually points to 1 after the last inst
+    //必须递减迭代器才能实际有效，因为__.end()实际指向最后一条指令之后
     tail = instList[tid].end();
     tail--;
 
@@ -383,6 +404,7 @@ ROB::insertInst(const DynInstPtr &inst)
             threadGroups[tid].size());
 }
 
+// ROB退休头指令：提交并删除ROB头部指令
 void
 ROB::retireHead(ThreadID tid)
 {
@@ -390,7 +412,7 @@ ROB::retireHead(ThreadID tid)
 
     assert(numInstsInROB > 0);
 
-    // Get the head ROB instruction by copying it and remove it from the list
+    // 获取ROB头部指令并从列表中删除
     InstIt head_it = instList[tid].begin();
 
     DynInstPtr head_inst = std::move(*head_it);
@@ -405,21 +427,21 @@ ROB::retireHead(ThreadID tid)
 
     --numInstsInROB;
 
-    //Update Group Size
+    //更新组大小
     commitGroup(head_inst, tid);
 
     head_inst->clearInROB();
     head_inst->setCommitted();
 
-    //Update "Global" Head of ROB
+    //更新"全局"ROB头部
     updateHead();
 
-    // @todo: A special case is needed if the instruction being
-    // retired is the only instruction in the ROB; otherwise the tail
-    // iterator will become invalidated.
+    // @todo: 如果退休的指令是ROB中的唯一指令，需要特殊处理；
+    // 否则tail迭代器将变为无效。
     cpu->removeFrontInst(head_inst);
 }
 
+// ROB检查头部组是否就绪：检查头部组的所有指令是否可以提交
 bool
 ROB::isHeadGroupReady(ThreadID tid)
 {
@@ -430,13 +452,13 @@ ROB::isHeadGroupReady(ThreadID tid)
 
         for (int i = 0; i < threadGroups[tid].front(); i++, it++) {
             auto& inst = *it;
-            // first inst must be readyToCommit
+            // 第一条指令必须readyToCommit
             if (!inst->readyToCommit()) {
                 return false;
             }
 
-            // if one group has barrier or non-speculative or fault
-            // this group must be committed
+            // 如果组中有屏障、非推测指令或故障
+            // 这个组必须被提交
             if (inst->readyToCommit() && (!inst->isExecuted() || inst->faulted())) {
                 return true;
             }
@@ -447,6 +469,7 @@ ROB::isHeadGroupReady(ThreadID tid)
     return false;
 }
 
+// ROB获取头部组最后完成的序列号：返回头部组中最后一条已执行指令的序列号
 InstSeqNum
 ROB::getHeadGroupLastDoneSeq(ThreadID tid)
 {
@@ -465,12 +488,14 @@ ROB::getHeadGroupLastDoneSeq(ThreadID tid)
     return 0;
 }
 
+// ROB空闲项数：返回指定线程的空闲ROB项数
 unsigned
 ROB::numFreeEntries(ThreadID tid)
 {
     return maxEntries[tid] - threadGroups[tid].size();
 }
 
+// ROB执行Squash：清除指定线程ROB中的错误推测指令
 void
 ROB::doSquash(ThreadID tid)
 {
@@ -495,9 +520,9 @@ ROB::doSquash(ThreadID tid)
     assert(dynSquashWidth);
     unsigned int num_insts_to_squash = dynSquashWidth;
 
-    // If the CPU is exiting, squash all of the instructions
-    // it is told to, even if that exceeds the squashWidth.
-    // Set the number to the number of entries (the max).
+    // 如果CPU正在退出，清除所有被告知的指令
+    // 即使超过squashWidth。
+    // 将数量设置为项数（最大值）。
     if (cpu->isThreadExiting(tid))
     {
         num_insts_to_squash = numEntries * instsPerGroup;
@@ -573,13 +598,14 @@ ROB::doSquash(ThreadID tid)
 }
 
 
+// ROB更新头部：更新全局ROB头部指针为最老的指令
 void
 ROB::updateHead()
 {
     InstSeqNum lowest_num = 0;
     bool first_valid = true;
 
-    // @todo: set ActiveThreads through ROB or CPU
+    // @todo: 通过ROB或CPU设置ActiveThreads
     std::list<ThreadID>::iterator threads = activeThreads->begin();
     std::list<ThreadID>::iterator end = activeThreads->end();
 
@@ -614,6 +640,7 @@ ROB::updateHead()
 
 }
 
+// ROB更新尾部：更新全局ROB尾部指针为最新的指令
 void
 ROB::updateTail()
 {
@@ -630,8 +657,7 @@ ROB::updateTail()
             continue;
         }
 
-        // If this is the first valid then assign w/out
-        // comparison
+        // 如果这是第一个有效的，直接赋值而不比较
         if (first_valid) {
             tail = instList[tid].end();
             tail--;
@@ -639,8 +665,8 @@ ROB::updateTail()
             continue;
         }
 
-        // Assign new tail if this thread's tail is younger
-        // than our current "tail high"
+        // 如果此线程的tail比当前"tail high"更新
+        // 则分配新tail
         InstIt tail_thread = instList[tid].end();
         tail_thread--;
 
@@ -651,6 +677,7 @@ ROB::updateTail()
 }
 
 
+// ROB Squash：启动指定线程的ROB清除操作
 void
 ROB::squash(InstSeqNum squash_num, ThreadID tid)
 {
@@ -670,8 +697,7 @@ ROB::squash(InstSeqNum squash_num, ThreadID tid)
 
     squashedSeqNum[tid] = squash_num;
 
-    // TODO: find the number of instructions to squash and
-    // the number of uncommited instructions
+    // TODO: 找到需要清除的指令数和未提交指令数
     unsigned total_inst_to_squash = 0;
     for (auto it = instList[tid].begin(); it != instList[tid].end(); ++it) {
         if ((*it)->seqNum > squash_num) {
@@ -692,6 +718,7 @@ ROB::squash(InstSeqNum squash_num, ThreadID tid)
     }
 }
 
+// ROB计算动态Squash宽度：根据不同的ROB遍历策略计算squash宽度
 unsigned
 ROB::computeDynSquashWidth(unsigned uncommitted_insts, unsigned to_squash)
 {
@@ -699,11 +726,13 @@ ROB::computeDynSquashWidth(unsigned uncommitted_insts, unsigned to_squash)
     double expected_cycles;
     switch (robWalkPolicy) {
         case ROBWalkPolicy::Rollback:
+            // 回滚策略：使用固定的回滚宽度
             dyn_squash_width = rollbackWidth;
             DPRINTF(ROB, "Recovery with rollback, walk ROB with width %u\n", dyn_squash_width);
             break;
 
         case ROBWalkPolicy::Replay:
+            // 重放策略：根据重放宽度计算squash宽度
             expected_cycles =
                 std::max(2.0, ((double)uncommitted_insts / replayWidth));
             dyn_squash_width = ceil((double)to_squash / expected_cycles);
@@ -715,6 +744,7 @@ ROB::computeDynSquashWidth(unsigned uncommitted_insts, unsigned to_squash)
             break;
 
         case ROBWalkPolicy::ConstCycle:
+            // 恒定周期策略：在固定周期内完成squash
             dyn_squash_width = ceil((double) to_squash / (double) constSquashCycle);
             dyn_squash_width = std::max(dyn_squash_width, rollbackWidth);
             DPRINTF(ROB, "Recovery with const cycle, walk ROB with width %u\n", dyn_squash_width);
@@ -726,6 +756,7 @@ ROB::computeDynSquashWidth(unsigned uncommitted_insts, unsigned to_squash)
     return dyn_squash_width;
 }
 
+// ROB读取头部指令：返回指定线程的ROB头部指令
 const DynInstPtr&
 ROB::readHeadInst(ThreadID tid)
 {
@@ -741,6 +772,7 @@ ROB::readHeadInst(ThreadID tid)
     }
 }
 
+// ROB读取尾部指令：返回指定线程的ROB尾部指令
 DynInstPtr
 ROB::readTailInst(ThreadID tid)
 {
@@ -750,6 +782,7 @@ ROB::readTailInst(ThreadID tid)
     return *tail_thread;
 }
 
+// ROB统计信息构造函数：初始化ROB统计计数器
 ROB::ROBStats::ROBStats(statistics::Group *parent)
   : statistics::Group(parent, "rob"),
     ADD_STAT(reads, statistics::units::Count::get(),
@@ -761,6 +794,7 @@ ROB::ROBStats::ROBStats(statistics::Group *parent)
     instPergroup.init(0, 8, 1).flags(statistics::nozero);
 }
 
+// ROB查找指令：在指定线程的ROB中查找指定序列号的指令
 DynInstPtr
 ROB::findInst(ThreadID tid, InstSeqNum squash_inst)
 {

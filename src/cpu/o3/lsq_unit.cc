@@ -80,40 +80,44 @@ namespace gem5
 namespace o3
 {
 
+// 检查Store到Load的数据转发地址范围覆盖情况
+// 参数: store_it - Store队列迭代器, request - Load请求, load_inst - Load指令
+//      load_req_idx - Load请求索引(-1表示完整请求), store_req_idx - Store请求索引(-1表示完整请求)
+// 返回值: 地址范围覆盖类型(完全覆盖/部分覆盖/无覆盖)
 LSQUnit::AddrRangeCoverage
 LSQUnit::checkStoreLoadForwardingRange(typename StoreQueue::iterator store_it,
                                       LSQRequest *request, const DynInstPtr &load_inst,
                                       int load_req_idx, int store_req_idx)
 {
-    // Extract address ranges from parameters
+    // 从参数中提取地址范围
     Addr req_s, req_e;
     if (load_req_idx == -1) {
-        // Complete load request
+        // 完整的Load请求
         req_s = request->mainReq()->getPaddr();
         req_e = req_s + request->mainReq()->getSize();
     } else {
-        // Split load sub-request
+        // 分片Load子请求
         req_s = request->_reqs[load_req_idx]->getPaddr();
         req_e = req_s + request->_reqs[load_req_idx]->getSize();
     }
 
     Addr st_s, st_e;
     if (store_req_idx == -1) {
-        // Complete store request
+        // 完整的Store请求
         st_s = store_it->instruction()->physEffAddr;
         st_e = st_s + store_it->size();
     } else {
-        // Split store sub-request
+        // 分片Store子请求
         st_s = store_it->request()->_reqs[store_req_idx]->getPaddr();
         st_e = st_s + store_it->request()->_reqs[store_req_idx]->getSize();
     }
 
     bool store_is_split = store_it->request() && store_it->request()->isSplit();
 
-    bool store_has_lower_limit = req_s >= st_s;
-    bool store_has_upper_limit = req_e <= st_e;
-    bool lower_load_has_store_part = req_s < st_e;
-    bool upper_load_has_store_part = req_e > st_s;
+    bool store_has_lower_limit = req_s >= st_s;     // Store覆盖Load的下边界
+    bool store_has_upper_limit = req_e <= st_e;     // Store覆盖Load的上边界
+    bool lower_load_has_store_part = req_s < st_e;  // Load的下部分与Store重叠
+    bool upper_load_has_store_part = req_e > st_s;  // Load的上部分与Store重叠
 
     DPRINTF(LSQUnit, "load_idx:%d,store_idx:%d req_s:%x,req_e:%x,st_s:%x,st_e:%x\n",
             load_req_idx, store_req_idx, req_s, req_e, st_s, st_e);
@@ -121,7 +125,7 @@ LSQUnit::checkStoreLoadForwardingRange(typename StoreQueue::iterator store_it,
             st_e - st_s, store_it->instruction()->pcState(),
             req_e - req_s, request->instruction()->pcState());
 
-    // Check for complete coverage - store fully contains the load request
+    // 检查完全覆盖 - Store完全包含Load请求
     if ((!store_it->instruction()->isAtomic() &&
          store_has_lower_limit && store_has_upper_limit &&
          !request->mainReq()->isLLSC()) &&
@@ -129,14 +133,14 @@ LSQUnit::checkStoreLoadForwardingRange(typename StoreQueue::iterator store_it,
 
         const auto &store_req = store_it->request()->mainReq();
 
-        // Check if store data is ready for forwarding
+        // 检查Store数据是否准备好转发
         if (store_it->instruction()->isSplitStoreAddr() && !store_it->canForwardToLoad()) {
-            // Store data not ready, need to set STLF replay flag for load
+            // Store数据未准备好，需要为Load设置STLF重放标志
             load_inst->setSTLFReplay();
             return AddrRangeCoverage::NoAddrRangeCoverage;
         } else {
-            // Store can forward to load
-            // For split stores, always return partial coverage to ensure proper handling
+            // Store可以转发到Load
+            // 对于分片Store，总是返回部分覆盖以确保正确处理
             if (store_is_split) {
                 return AddrRangeCoverage::PartialAddrRangeCoverage;
             } else {
@@ -146,7 +150,7 @@ LSQUnit::checkStoreLoadForwardingRange(typename StoreQueue::iterator store_it,
             }
         }
     }
-    // Check for partial coverage - store and load have some overlap
+    // 检查部分覆盖 - Store和Load有部分重叠
     else if ((!((req_s > req_e) || (st_s > st_e))) &&
              ((!request->mainReq()->isLLSC() &&
                ((store_has_lower_limit && lower_load_has_store_part) ||
@@ -162,23 +166,31 @@ LSQUnit::checkStoreLoadForwardingRange(typename StoreQueue::iterator store_it,
         return AddrRangeCoverage::PartialAddrRangeCoverage;
     }
 
-    // No overlap between store and load addresses
+    // Store和Load地址之间无重叠
     return AddrRangeCoverage::NoAddrRangeCoverage;
 }
 
+// StoreBufferEntry重置：初始化Store Buffer项
+// 参数: block_vaddr - 块虚拟地址, block_paddr - 块物理地址, offset - 块内偏移
+//      datas - 数据指针, size - 数据大小, mask - 有效字节掩码
 void
 StoreBufferEntry::reset(uint64_t block_vaddr, uint64_t block_paddr, uint64_t offset, uint8_t *datas, uint64_t size,
                         const std::vector<bool> &mask)
 {
+    // 清空偏移之前的有效掩码
     std::fill(validMask.begin(), validMask.begin() + offset, false);
 
+    // 设置有效字节掩码
     for (int i = 0; i < size; i++) {
         validMask[offset + i] = mask[i];
     }
 
+    // 清空偏移之后的有效掩码
     std::fill(validMask.begin() + offset + size, validMask.end(), false);
+    // 复制数据到块数据缓冲区
     memcpy(blockDatas.data() + offset, datas, size);
 
+    // 设置块地址和状态
     this->blockVaddr = block_vaddr;
     this->blockPaddr = block_paddr;
     this->sending = false;
@@ -186,10 +198,13 @@ StoreBufferEntry::reset(uint64_t block_vaddr, uint64_t block_paddr, uint64_t off
     this->vice = nullptr;
 }
 
+// StoreBufferEntry合并：将新数据合并到现有Store Buffer项
+// 参数: offset - 块内偏移, datas - 数据指针, size - 数据大小, mask - 有效字节掩码
 void
 StoreBufferEntry::merge(uint64_t offset, uint8_t *datas, uint64_t size, const std::vector<bool> &mask)
 {
     assert(offset + size <= validMask.size());
+    // 逐字节合并有效数据
     for (uint64_t i = 0; i < size; ++i) {
         if (mask[i]) {
             blockDatas[offset + i] = datas[i];
@@ -198,11 +213,14 @@ StoreBufferEntry::merge(uint64_t offset, uint8_t *datas, uint64_t size, const st
     }
 }
 
+// StoreBufferEntry记录转发：记录从Store Buffer到Load的数据转发
+// 参数: req - 请求, lsqreq - LSQ请求
+// 返回值: true表示完全转发，false表示部分转发
 bool
 StoreBufferEntry::recordForward(RequestPtr req, LSQ::LSQRequest *lsqreq)
 {
     int offset = req->getPaddr() & (validMask.size() - 1);
-    // the offset in the split request
+    // 分片请求中的偏移
     int goffset = req->getVaddr() - lsqreq->mainReq()->getVaddr();
     if (goffset > 0) {
         assert(offset == 0);
@@ -211,7 +229,7 @@ StoreBufferEntry::recordForward(RequestPtr req, LSQ::LSQRequest *lsqreq)
     for (int i = 0; i < req->getSize(); i++) {
         assert(goffset + i < lsqreq->_size);
         if (vice && vice->validMask[offset + i]) {
-            // vice is newer
+            // vice更新，优先使用vice的数据
             assert(vice->blockVaddr == blockVaddr);
             lsqreq->SBforwardPackets.push_back(
                 LSQ::LSQRequest::FWDPacket{.idx = goffset + i, .byte = vice->blockDatas[offset + i]});
@@ -226,40 +244,47 @@ StoreBufferEntry::recordForward(RequestPtr req, LSQ::LSQRequest *lsqreq)
     return full_forward;
 }
 
+// StoreBuffer设置数据：初始化Store Buffer的数据结构
+// 参数: data_vec - Store Buffer项向量
 void
 StoreBuffer::setData(std::vector<StoreBufferEntry *> &data_vec)
 {
     this->data_vec = data_vec;
     int way = data_vec.size();
     _size = 0;
-    lru_index.set_capacity(way);
-    free_list.set_capacity(way);
-    crossRef.resize(way);
+    lru_index.set_capacity(way);      // 设置LRU索引容量
+    free_list.set_capacity(way);      // 设置空闲列表容量
+    crossRef.resize(way);             // 调整交叉引用大小
     data_vec.resize(way);
-    data_vld.resize(way, false);
+    data_vld.resize(way, false);      // 初始化有效位为false
     for (uint64_t i = 0; i < way; i++) {
-        free_list.push_back(i);
+        free_list.push_back(i);       // 所有项初始为空闲
     }
 }
 
+// StoreBuffer检查是否已满
+// 返回值: true表示Store Buffer已满
 bool
 StoreBuffer::full()
 {
     return free_list.size() == 0;
 }
 
+// StoreBuffer获取大小：返回已使用的项数
 uint64_t
 StoreBuffer::size()
 {
     return this->_size;
 }
 
+// StoreBuffer获取未发送大小：返回尚未发送到Cache的项数
 uint64_t
 StoreBuffer::unsentSize()
 {
     return lru_index.size();
 }
 
+// StoreBuffer获取空闲项：从空闲列表中获取一个空闲的Store Buffer项
 StoreBufferEntry *
 StoreBuffer::getEmpty()
 {
@@ -269,6 +294,8 @@ StoreBuffer::getEmpty()
     return data_vec[index];
 }
 
+// StoreBuffer插入：将新的Store Buffer项插入到缓冲区
+// 参数: index - 项索引, addr - 块物理地址
 void
 StoreBuffer::insert(int index, uint64_t addr)
 {
@@ -277,11 +304,14 @@ StoreBuffer::insert(int index, uint64_t addr)
     assert(!lru_index.full());
     _size++;
     auto [it, _] = data_map.insert({addr, data_vec[index]});
-    crossRef[index] = it;
-    data_vld[index] = true;
-    lru_index.push_front(index);
+    crossRef[index] = it;              // 保存地址映射的迭代器
+    data_vld[index] = true;            // 标记项有效
+    lru_index.push_front(index);       // 插入到LRU队列头部（最新）
 }
 
+// StoreBuffer获取：根据块地址查找Store Buffer项
+// 参数: addr - 块物理地址
+// 返回值: 找到的Store Buffer项，未找到返回nullptr
 StoreBufferEntry *
 StoreBuffer::get(uint64_t addr)
 {
@@ -293,24 +323,32 @@ StoreBuffer::get(uint64_t addr)
     return iter->second;
 }
 
+// StoreBuffer更新：更新Store Buffer项的LRU位置
+// 参数: index - 项索引
 void
 StoreBuffer::update(int index)
 {
     assert(std::find(lru_index.begin(), lru_index.end(), index) != lru_index.end());
     lru_index.erase(std::find(lru_index.begin(), lru_index.end(), index));
-    lru_index.push_front(index);
+    lru_index.push_front(index);       // 移到LRU队列头部（最新访问）
 }
 
+// StoreBuffer获取驱逐项：获取LRU队列中最老的项用于驱逐
+// 返回值: 最老的Store Buffer项
 StoreBufferEntry *
 StoreBuffer::getEvict()
 {
     assert(lru_index.size() > 0);
-    uint64_t index = lru_index.back();
+    uint64_t index = lru_index.back();  // 从LRU队列尾部获取最老的项
     lru_index.pop_back();
     assert(data_vld[index]);
     return data_vec[index];
 }
 
+// StoreBuffer创建副本项：为现有项创建一个副本(vice)项
+// 用于处理同一Cache Line的多次Store
+// 参数: entry - 原始Store Buffer项
+// 返回值: 新创建的副本项
 StoreBufferEntry *
 StoreBuffer::createVice(StoreBufferEntry *entry)
 {
@@ -319,10 +357,12 @@ StoreBuffer::createVice(StoreBufferEntry *entry)
     assert(!entry->vice);
     entry->vice = vice;
     data_vld[vice->index] = true;
-    // do not insert map and lru_index
+    // 不插入到地址映射和LRU索引中
     return vice;
 }
 
+// StoreBuffer释放：释放Store Buffer项并回收到空闲列表
+// 参数: entry - 要释放的Store Buffer项
 void
 StoreBuffer::release(StoreBufferEntry *entry)
 {
@@ -330,11 +370,11 @@ StoreBuffer::release(StoreBufferEntry *entry)
     _size--;
     int index = entry->index;
     data_vld[index] = false;
-    data_map.erase(crossRef[index]);
+    data_map.erase(crossRef[index]);    // 从地址映射中删除
     assert(std::find(free_list.begin(), free_list.end(), index) == free_list.end());
-    free_list.push_back(index);
+    free_list.push_back(index);         // 回收到空闲列表
     if (entry->vice) {
-        // make vice regular
+        // 将副本项提升为常规项
         auto vice = entry->vice;
         assert(data_vld[vice->index]);
         auto [it, _] = data_map.insert({vice->blockPaddr, vice});
@@ -343,20 +383,25 @@ StoreBuffer::release(StoreBufferEntry *entry)
     }
 }
 
+// SQEntry设置状态：更新Split Store（分片Store）的状态
+// 参数: status - Split Store状态（地址就绪/数据就绪/STA流水线完成/STD流水线完成）
 void
 LSQUnit::SQEntry::setStatus(SplitStoreStatus status)
 {
-    _addrReady |= status == SplitStoreStatus::AddressReady;
-    _dataReady |= status == SplitStoreStatus::DataReady;
-    _staFinish |= status == SplitStoreStatus::StaPipeFinish;
-    _stdFinish |= status == SplitStoreStatus::StdPipeFinish;
+    _addrReady |= status == SplitStoreStatus::AddressReady;      // 地址就绪
+    _dataReady |= status == SplitStoreStatus::DataReady;        // 数据就绪
+    _staFinish |= status == SplitStoreStatus::StaPipeFinish;    // STA流水线完成
+    _stdFinish |= status == SplitStoreStatus::StdPipeFinish;    // STD流水线完成
     if (splitStoreFinish()) {
-        instruction()->setExecuted();
+        instruction()->setExecuted();  // 所有部分完成，标记指令已执行
     } else {
         assert(!instruction()->isExecuted());
     }
 }
 
+// WritebackRegEvent构造函数：创建寄存器回写事件
+// 用于调度Load指令的数据回写到寄存器文件
+// 参数: _inst - 指令指针, _pkt - 数据packet, lsq_ptr - LSQUnit指针
 LSQUnit::WritebackRegEvent::WritebackRegEvent(const DynInstPtr &_inst,
         PacketPtr _pkt, LSQUnit *lsq_ptr)
     : Event(Default_Pri, AutoDelete),
@@ -366,58 +411,71 @@ LSQUnit::WritebackRegEvent::WritebackRegEvent(const DynInstPtr &_inst,
     _inst->savedRequest->writebackScheduled();
 }
 
+// WritebackRegEvent处理：执行寄存器回写
 void
 LSQUnit::WritebackRegEvent::process()
 {
     assert(!lsqPtr->cpu->switchedOut());
 
-    lsqPtr->writebackReg(inst, pkt);
+    lsqPtr->writebackReg(inst, pkt);  // 回写数据到寄存器
 
     assert(inst->savedRequest);
     inst->savedRequest->writebackDone();
     delete pkt;
 }
 
+// WritebackRegEvent描述：返回事件描述字符串
 const char *
 LSQUnit::WritebackRegEvent::description() const
 {
     return "writeback to reg";
 }
 
+// bankConflictReplayEvent构造函数：创建Bank冲突重放事件
+// 用于处理Cache Bank冲突导致的Load重放
 LSQUnit::bankConflictReplayEvent::bankConflictReplayEvent(LSQUnit *lsq_ptr)
     : Event(Default_Pri, AutoDelete), lsqPtr(lsq_ptr)
 {
 }
 
+// bankConflictReplayEvent处理：执行Bank冲突重放
 void
 LSQUnit::bankConflictReplayEvent::process()
 {
     lsqPtr->bankConflictReplay();
 }
 
+// bankConflictReplayEvent描述：返回事件描述字符串
 const char *
 LSQUnit::bankConflictReplayEvent::description() const
 {
     return "bankConflictReplayEvent";
 }
 
+// tagReadFailReplayEvent构造函数：创建Tag读取失败重放事件
+// 用于处理Cache Tag读取失败导致的Load重放
 LSQUnit::tagReadFailReplayEvent::tagReadFailReplayEvent(LSQUnit *lsq_ptr)
     : Event(Default_Pri, AutoDelete), lsqPtr(lsq_ptr)
 {
 }
 
+// tagReadFailReplayEvent处理：执行Tag读取失败重放
 void
 LSQUnit::tagReadFailReplayEvent::process()
 {
     lsqPtr->tagReadFailReplay();
 }
 
+// tagReadFailReplayEvent描述：返回事件描述字符串
 const char *
 LSQUnit::tagReadFailReplayEvent::description() const
 {
     return "tagReadFailReplayEvent";
 }
 
+// LSQUnit接收时序响应：接收来自Cache的响应packet
+// 参数: pkt - 响应packet
+// 返回值: 处理成功返回true
 bool
 LSQUnit::recvTimingResp(PacketPtr pkt)
 {
@@ -431,10 +489,11 @@ LSQUnit::recvTimingResp(PacketPtr pkt)
                 dynamic_cast<LSQ::SbufferRequest *>(request)->sbuffer_entry->blockPaddr);
     }
     bool ret = true;
-    /* Check that the request is still alive before any further action. */
+    /* 在进一步操作之前检查请求是否仍然有效 */
     if (!request->isReleased()) {
         ret = request->recvTimingResp(pkt);
     } else if (request->instruction()) {
+        // 请求已释放，忽略响应
         DPRINTF(LoadPipeline, "LSQUnit::recvTimingResp [sn:%lu] pkt: %s - ignored\n",
                 request->instruction()->seqNum, pkt->print());
         request->instruction()->hasPendingCacheReq(false);
@@ -444,25 +503,24 @@ LSQUnit::recvTimingResp(PacketPtr pkt)
     return ret;
 }
 
+// LSQUnit完成数据访问：处理Load/Store指令的数据访问完成
+// 参数: pkt - 响应packet
 void
 LSQUnit::completeDataAccess(PacketPtr pkt)
 {
     LSQRequest *request = dynamic_cast<LSQRequest *>(pkt->senderState);
     DynInstPtr inst = request->instruction();
 
-    // hardware transactional memory
-    // sanity check
+    // 硬件事务内存（HTM）
+    // 完整性检查
     if (pkt->isHtmTransactional() && !inst->isSquashed()) {
         assert(inst->getHtmTransactionUid() == pkt->getHtmTransactionUid());
     }
 
-    // if in a HTM transaction, it's possible
-    // to abort within the cache hierarchy.
-    // This is signalled back to the processor
-    // through responses to memory requests.
+    // 如果在HTM事务中，可能会在Cache层次结构中中止
+    // 这通过对内存请求的响应发送回处理器
     if (pkt->htmTransactionFailedInCache()) {
-        // cannot do this for write requests because
-        // they cannot tolerate faults
+        // 不能对写请求执行此操作，因为它们不能容忍故障
         const HtmCacheFailure htm_rc =
             pkt->getHtmTransactionFailedInCacheRC();
         if (pkt->isWrite()) {
@@ -472,6 +530,7 @@ LSQUnit::completeDataAccess(PacketPtr pkt)
                 pkt->getAddr(), htmFailureToStr(htm_rc),
                 pkt->getHtmTransactionUid());
         } else {
+            // 对于Load，需要生成HTM故障
             HtmFailureFaultCause fail_reason =
                 HtmFailureFaultCause::INVALID;
 
@@ -480,9 +539,8 @@ LSQUnit::completeDataAccess(PacketPtr pkt)
             } else if (htm_rc == HtmCacheFailure::FAIL_REMOTE) {
                 fail_reason = HtmFailureFaultCause::MEMORY;
             } else if (htm_rc == HtmCacheFailure::FAIL_OTHER) {
-                // these are likely loads that were issued out of order
-                // they are faulted here, but it's unlikely that these will
-                // ever reach the commit head.
+                // 这些可能是乱序发射的Load
+                // 它们在这里被标记为故障，但不太可能到达提交头部
                 fail_reason = HtmFailureFaultCause::OTHER;
             } else {
                 panic("HTM error - unhandled return code from cache (%s)",
@@ -550,8 +608,36 @@ LSQUnit::completeDataAccess(PacketPtr pkt)
             completeStore(request->instruction()->sqIt);
         }
     }
+
+    // Handle VLMergeBuffer sub-request completion for vector memory instructions
+    // Exclude VlWhole and VsWhole instructions as they don't use VLMergeBuffer
+    if (inst->isVector() && inst->isLoad()) {
+        const StaticInst* static_inst = inst->staticInst.get();
+        std::string inst_disassembly = static_inst->disassemble(0);
+        bool is_vlwhole = (inst_disassembly.find("vl1re") != std::string::npos ||
+                          inst_disassembly.find("vl2re") != std::string::npos ||
+                          inst_disassembly.find("vl4re") != std::string::npos ||
+                          inst_disassembly.find("vl8re") != std::string::npos);
+
+        if (!is_vlwhole) {
+            vlLoadMergeBuffer.completeSubRequest(inst);
+        }
+    } else if (inst->isVector() && inst->isStore()) {
+        const StaticInst* static_inst = inst->staticInst.get();
+        std::string inst_disassembly = static_inst->disassemble(0);
+        bool is_vswhole = (inst_disassembly.find("vs1r") != std::string::npos ||
+                          inst_disassembly.find("vs2r") != std::string::npos ||
+                          inst_disassembly.find("vs4r") != std::string::npos ||
+                          inst_disassembly.find("vs8r") != std::string::npos);
+
+        if (!is_vswhole) {
+            vlStoreMergeBuffer.completeSubRequest(inst);
+        }
+    }
 }
 
+// LSQUnit构造函数：初始化Load-Store Queue Unit
+// 参数: lqEntries - Load Queue项数, sqEntries - Store Queue项数, sbufferEntries - Store Buffer项数等
 LSQUnit::LSQUnit(uint32_t lqEntries, uint32_t sqEntries, uint32_t sbufferEntries, uint32_t sbufferEvictThreshold,
     uint64_t storeBufferInactiveThreshold, uint32_t ldPipeStages, uint32_t stPipeStages,
     uint32_t maxRARQEntries, uint32_t maxRAWQEntries, unsigned rarDequeuePerCycle,
@@ -568,8 +654,8 @@ LSQUnit::LSQUnit(uint32_t lqEntries, uint32_t sqEntries, uint32_t sbufferEntries
       loadQueue(lqEntries),
       loadCompletedIdx(loadQueue.head()),
       storeCompletedIdx(storeQueue.head()),
-      loadPipe(ldPipeStages - 1, 0),
-      storePipe(stPipeStages - 1, 0),
+      loadPipe(ldPipeStages - 1, 0),      // Load流水线
+      storePipe(stPipeStages - 1, 0),     // Store流水线
       storesToWB(0),
       htmStarts(0),
       htmStops(0),
@@ -581,24 +667,26 @@ LSQUnit::LSQUnit(uint32_t lqEntries, uint32_t sqEntries, uint32_t sbufferEntries
       storeInFlight(false),
       lastClockSQPopEntries(0),
       lastClockLQPopEntries(0),
-      maxRARQEntries(maxRARQEntries),
-      maxRAWQEntries(maxRAWQEntries),
-      rarDequeuePerCycle(rarDequeuePerCycle),
-      rawDequeuePerCycle(rawDequeuePerCycle),
+      maxRARQEntries(maxRARQEntries),         // RAR队列最大项数
+      maxRAWQEntries(maxRAWQEntries),         // RAW队列最大项数
+      rarDequeuePerCycle(rarDequeuePerCycle), // RAR队列每周期出队数
+      rawDequeuePerCycle(rawDequeuePerCycle), // RAW队列每周期出队数
       loadCompletionWidth(loadCompletionWidth),
       storeCompletionWidth(storeCompletionWidth),
       stats(nullptr)
 {
-    // reserve space, we want if sq will be full, sbuffer will start evicting
+    // 预留空间，当SQ将满时，sbuffer开始驱逐
     sqFullUpperLimit = sqEntries - 4;
     sqFullLowerLimit = sqFullUpperLimit - 4;
 
     loadPipeSx.resize(ldPipeStages);
     storePipeSx.resize(stPipeStages);
 
+    // 初始化Load流水线各级
     for (int i = 0; i < ldPipeStages; i++) {
         loadPipeSx[i] = loadPipe.getWire(-i);
     }
+    // 初始化Store流水线各级
     for (int i = 0; i < stPipeStages; i++) {
         storePipeSx[i] = storePipe.getWire(-i);
     }
@@ -606,13 +694,15 @@ LSQUnit::LSQUnit(uint32_t lqEntries, uint32_t sqEntries, uint32_t sbufferEntries
     assert(sqFullLowerLimit > 0);
 }
 
+// LSQUnit时钟推进：推进Load和Store流水线
 void
 LSQUnit::tick()
 {
-    loadPipe.advance();
-    storePipe.advance();
+    loadPipe.advance();   // Load流水线前进一级
+    storePipe.advance();  // Store流水线前进一级
 }
 
+// LSQUnit初始化：设置CPU、IEW指针，初始化队列和缓冲区
 void
 LSQUnit::init(CPU *cpu_ptr, IEW *iew_ptr, const BaseO3CPUParams &params,
         LSQ *lsq_ptr, unsigned id)
@@ -630,11 +720,11 @@ LSQUnit::init(CPU *cpu_ptr, IEW *iew_ptr, const BaseO3CPUParams &params,
 
     system = params.system;
 
-    depCheckShift = params.LSQDepCheckShift;
-    checkLoads = params.LSQCheckLoads;
-    needsTSO = params.needsTSO;
+    depCheckShift = params.LSQDepCheckShift;  // 依赖检查地址右移位数
+    checkLoads = params.LSQCheckLoads;        // 是否检查Load
+    needsTSO = params.needsTSO;               // 是否需要TSO内存模型
 
-    // Clear RAR/RAW queues
+    // 清空RAR/RAW队列
     RARQueue.clear();
     RAWQueue.clear();
     RARReplayQueue.clear();
@@ -646,6 +736,10 @@ LSQUnit::init(CPU *cpu_ptr, IEW *iew_ptr, const BaseO3CPUParams &params,
         sbufer.push_back(new StoreBufferEntry(cpu->cacheLineSize(), i));
     }
     storeBuffer.setData(sbufer);
+
+    // 初始化VLMergeBuffer（用于向量Load/Store指令）
+    vlLoadMergeBuffer.init(params.VLMergeBufferEntries, params.VLMergeBufferThreshold);
+    vlStoreMergeBuffer.init(params.VLMergeBufferEntries, params.VLMergeBufferThreshold);
 
     resetState();
 }
@@ -887,6 +981,31 @@ LSQUnit::insertLoad(const DynInstPtr &load_inst)
             "(unless due to misspeculation)\n");
         }
     }
+
+    // Allocate VLLoadMergeBuffer entry for vector load instructions
+    if (load_inst->isVector() && load_inst->isLoad()) {
+        // Exclude VlWhole instructions as they use atomic execution
+        const StaticInst* static_inst = load_inst->staticInst.get();
+        std::string inst_disassembly = static_inst->disassemble(0);
+        bool is_vlwhole = (inst_disassembly.find("vl1re") != std::string::npos ||
+                          inst_disassembly.find("vl2re") != std::string::npos ||
+                          inst_disassembly.find("vl4re") != std::string::npos ||
+                          inst_disassembly.find("vl8re") != std::string::npos);
+
+        if (!is_vlwhole) {
+            DPRINTF(LSQUnit, "Allocating VLLoadMergeBuffer entry for vector load "
+                    "MicroInst [sn:%lli]\n", load_inst->seqNum);
+            if (!vlLoadMergeBuffer.allocateEntry(load_inst)) {
+                panic("VLLoadMergeBuffer failed to allocate entry for vector load MicroInst [sn:%lli]. "
+                      "This should not happen as dispatch should block when buffer is full.",
+                      load_inst->seqNum);
+            }
+        } else {
+            DPRINTF(LSQUnit, "Skipping VLLoadMergeBuffer allocation for VlWhole "
+                    "instruction [sn:%lli] disassembly: %s\n",
+                    load_inst->seqNum, inst_disassembly.c_str());
+        }
+    }
 }
 
 void
@@ -908,6 +1027,31 @@ LSQUnit::insertStore(const DynInstPtr& store_inst)
     store_inst->lqIt = loadQueue.end();
 
     storeQueue.back().set(store_inst);
+
+    // Allocate VLStoreMergeBuffer entry for vector store instructions
+    if (store_inst->isVector() && store_inst->isStore()) {
+        // Exclude VsWhole instructions as they use atomic execution
+        const StaticInst* static_inst = store_inst->staticInst.get();
+        std::string inst_disassembly = static_inst->disassemble(0);
+        bool is_vswhole = (inst_disassembly.find("vs1r") != std::string::npos ||
+                          inst_disassembly.find("vs2r") != std::string::npos ||
+                          inst_disassembly.find("vs4r") != std::string::npos ||
+                          inst_disassembly.find("vs8r") != std::string::npos);
+
+        if (!is_vswhole) {
+            DPRINTF(LSQUnit, "Allocating VLStoreMergeBuffer entry for vector store "
+                    "MicroInst [sn:%lli]\n", store_inst->seqNum);
+            if (!vlStoreMergeBuffer.allocateEntry(store_inst)) {
+                panic("VLStoreMergeBuffer failed to allocate entry for vector store MicroInst [sn:%lli]. "
+                      "This should not happen as dispatch should block when buffer is full.",
+                      store_inst->seqNum);
+            }
+        } else {
+            DPRINTF(LSQUnit, "Skipping VLStoreMergeBuffer allocation for VsWhole "
+                    "instruction [sn:%lli] disassembly: %s\n",
+                    store_inst->seqNum, inst_disassembly.c_str());
+        }
+    }
 }
 
 bool
@@ -3479,6 +3623,105 @@ LSQUnit::processReplayQueues()
         inst->clearReplayType();
         inst->clearNeedReplay();
         inst->issueQue->retryMem(inst);
+    }
+}
+
+void
+VLMergeBuffer::init(uint32_t num_entries, uint32_t backpressure_threshold)
+{
+    numEntries = num_entries;
+    threshold = backpressure_threshold;
+    entries.resize(numEntries);
+    freeList.resize(numEntries);
+
+    // Initialize free list with all entries
+    for (uint32_t i = 0; i < numEntries; i++) {
+        freeList.push_back(i);
+    }
+}
+
+bool
+VLMergeBuffer::allocateEntry(const DynInstPtr& inst)
+{
+    if (freeList.empty()) {
+        return false;
+    }
+
+    uint32_t entryIdx = freeList.front();
+    freeList.pop_front();
+
+    VLMergeEntry& entry = entries[entryIdx];
+    entry.inst = inst;
+    entry.flowNum = 1; // Start with 1, will be updated based on actual sub-requests
+    entry.valid = true;
+
+    DPRINTF(LSQUnit, "VLMergeBuffer: Allocated entry %d for vector inst [sn:%lli]\n",
+            entryIdx, inst->seqNum);
+
+    return true;
+}
+
+void
+VLMergeBuffer::completeSubRequest(const DynInstPtr& inst)
+{
+    // Find the entry for this instruction
+    for (uint32_t i = 0; i < numEntries; i++) {
+        VLMergeEntry& entry = entries[i];
+        if (entry.valid && entry.inst && entry.inst->seqNum == inst->seqNum) {
+            entry.flowNum--;
+            DPRINTF(LSQUnit, "VLMergeBuffer: Completed sub-request for inst [sn:%lli], flowNum=%d\n",
+                    inst->seqNum, entry.flowNum);
+
+            if (entry.flowNum == 0) {
+                // All sub-requests completed, release the entry
+                DPRINTF(LSQUnit, "VLMergeBuffer: Releasing entry %d for inst [sn:%lli]\n",
+                        i, inst->seqNum);
+                entry.inst = nullptr;
+                entry.valid = false;
+                freeList.push_back(i);
+            }
+            return;
+        }
+    }
+}
+
+bool
+VLMergeBuffer::isBlocked() const
+{
+    return numFreeEntries() <= threshold;
+}
+
+uint32_t
+VLMergeBuffer::numFreeEntries() const
+{
+    return freeList.size();
+}
+
+void
+VLMergeBuffer::squashAfter(InstSeqNum seq_num)
+{
+    for (uint32_t i = 0; i < numEntries; i++) {
+        VLMergeEntry& entry = entries[i];
+        if (entry.valid && entry.inst && entry.inst->seqNum > seq_num) {
+            DPRINTF(LSQUnit, "VLMergeBuffer: Squashing entry %d for inst [sn:%lli]\n",
+                    i, entry.inst->seqNum);
+            entry.inst = nullptr;
+            entry.valid = false;
+            freeList.push_back(i);
+        }
+    }
+}
+
+void
+VLMergeBuffer::clear()
+{
+    for (uint32_t i = 0; i < numEntries; i++) {
+        entries[i].inst = nullptr;
+        entries[i].valid = false;
+    }
+    freeList.clear();
+    for (uint32_t i = 0; i < numEntries; i++) {
+        freeList.push_back(i);
     }
 }
 

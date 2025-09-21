@@ -87,19 +87,21 @@ namespace gem5
 namespace o3
 {
 
+// Commit处理陷阱事件：处理异常和中断引起的陷阱
 void
 Commit::processTrapEvent(ThreadID tid)
 {
-    // This will get reset by commit if it was switched out at the
-    // time of this event processing.
+    // 如果在事件处理时被切换出去，这将被commit重置
     trapSquash[tid] = true;
-    // update priv mode
+    // 更新特权模式
     toIEW->commitInfo[0].clearInterrupt = true;
 }
 
+// Commit构造函数：初始化Commit阶段
+// Commit阶段负责顺序提交已执行完成的指令，处理异常和中断
 Commit::Commit(CPU *_cpu, branch_prediction::BPredUnit *_bp, const BaseO3CPUParams &params)
     : commitPolicy(params.smtCommitPolicy),
-      stuckCheckEvent([this](){
+      stuckCheckEvent([this](){  // 卡住检查事件：检测Commit阶段是否卡住超过40000周期
         static std::vector<DynInstPtr> debug_insts;
         if (cpu->curCycle() - this->lastCommitCycle > 40000) {
             if (auto inst = rob->readHeadInst(0)) {
@@ -147,12 +149,13 @@ Commit::Commit(CPU *_cpu, branch_prediction::BPredUnit *_bp, const BaseO3CPUPara
     _nextStatus = Inactive;
 
     if (commitPolicy == CommitPolicy::RoundRobin) {
-        //Set-Up Priority List
+        //设置优先级列表（轮询策略）
         for (ThreadID tid = 0; tid < numThreads; tid++) {
             priority_list.push_back(tid);
         }
     }
 
+    // 初始化所有线程的Commit状态
     for (ThreadID tid = 0; tid < MaxThreads; tid++) {
         commitStatus[tid] = Idle;
         changedROBNumEntries[tid] = false;
@@ -166,8 +169,8 @@ Commit::Commit(CPU *_cpu, branch_prediction::BPredUnit *_bp, const BaseO3CPUPara
         committedStores[tid] = false;
         checkEmptyROB[tid] = false;
         renameMap[tid] = nullptr;
-        htmStarts[tid] = 0;
-        htmStops[tid] = 0;
+        htmStarts[tid] = 0;  // HTM开始计数
+        htmStops[tid] = 0;   // HTM停止计数
     }
     interrupt = NoFault;
 

@@ -870,6 +870,11 @@ class LSQ
     /** Returns if the SQ of a given thread is full. */
     bool sqFull(ThreadID tid);
 
+    /** Returns if any of the VLMergeBuffers are blocked. */
+    bool vlMergeBufferBlocked();
+    /** Returns if the VLMergeBuffer of a given thread is blocked. */
+    bool vlMergeBufferBlocked(ThreadID tid);
+
     /** Returns whether the head instruction of sq has completed*/
     const DynInstPtr& getLSQHeadInst(ThreadID tid, bool isLoad);
 

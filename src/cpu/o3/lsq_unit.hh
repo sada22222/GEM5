@@ -149,6 +149,52 @@ public:
 };
 
 /**
+ * Vector Load/Store Merge Buffer for tracking vector memory operations.
+ * Uses a freelist structure with 16 entries and threshold-based backpressure.
+ */
+class VLMergeBuffer
+{
+  private:
+    struct VLMergeEntry
+    {
+        DynInstPtr inst;        // The vector instruction
+        uint32_t flowNum;       // Number of sub-requests remaining
+        bool valid;             // Entry is valid
+
+        VLMergeEntry() : inst(nullptr), flowNum(0), valid(false) {}
+    };
+
+    uint32_t numEntries;        // Total number of entries (16)
+    uint32_t threshold;         // Threshold for backpressure (6)
+    std::vector<VLMergeEntry> entries;
+    boost::circular_buffer<uint32_t> freeList;
+
+  public:
+    VLMergeBuffer() : numEntries(0), threshold(0) {}
+
+    /** Initialize the VLMergeBuffer */
+    void init(uint32_t num_entries, uint32_t backpressure_threshold);
+
+    /** Allocate an entry for a vector instruction */
+    bool allocateEntry(const DynInstPtr& inst);
+
+    /** Complete a sub-request for a vector instruction */
+    void completeSubRequest(const DynInstPtr& inst);
+
+    /** Check if buffer is blocked (free entries <= threshold) */
+    bool isBlocked() const;
+
+    /** Get number of free entries */
+    uint32_t numFreeEntries() const;
+
+    /** Squash entries after a given sequence number */
+    void squashAfter(InstSeqNum seq_num);
+
+    /** Clear all entries */
+    void clear();
+};
+
+/**
  * Class that implements the actual LQ and SQ for each specific
  * thread.  Both are circular queues; load entries are freed upon
  * committing, while store entries are freed once they writeback. The
@@ -963,6 +1009,11 @@ class LSQUnit
     bool isStalled()  { return stalled; }
 
     LSQUnitStats* getStats() { return &stats; }
+
+    /** Vector Load/Store Merge Buffer instances */
+    VLMergeBuffer vlLoadMergeBuffer;
+    VLMergeBuffer vlStoreMergeBuffer;
+
   public:
     typedef typename CircularQueue<LQEntry>::iterator LQIterator;
     typedef typename CircularQueue<SQEntry>::iterator SQIterator;

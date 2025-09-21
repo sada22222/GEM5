@@ -39,9 +39,8 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-// @todo: Fix the instantaneous communication among all the stages within
-// iew.  There's a clear delay between issue and execute, yet backwards
-// communication happens simultaneously.
+// @todo: 修复IEW内部各阶段间的即时通信问题
+// IEW各阶段间存在明显的延迟（发射到执行），但反向通信却是同时发生的
 
 #include "cpu/o3/iew.hh"
 
@@ -74,141 +73,150 @@ namespace gem5
 namespace o3
 {
 
+// IEW（Issue/Execute/Writeback）阶段构造函数
+// 初始化发射、执行和写回阶段的所有组件和参数
 IEW::IEW(CPU *_cpu, const BaseO3CPUParams &params)
-    : dqSize(params.numDQEntries),
-      issueToExecQueue(params.backComSize, params.forwardComSize),
-      cpu(_cpu),
-      scheduler(params.scheduler),
-      instQueue(_cpu, this, params),
-      ldstQueue(_cpu, this, params),
-      dispWidth(params.dispWidth),
-      commitToIEWDelay(params.commitToIEWDelay),
-      renameToIEWDelay(params.renameToIEWDelay),
-      enableDispatchStage(params.enableDispatchStage),
-      renameWidth(params.renameWidth),
-      wbNumInst(0),
-      wbCycle(0),
-      wbDelay(params.executeToWriteBackDelay),
-      wbWidth(params.wbWidth),
-      enableStoreSetTrain(params.enable_storeSet_train),
-      numThreads(params.numThreads),
-      iewStats(cpu)
+    : dqSize(params.numDQEntries),                          // 分派队列大小
+      issueToExecQueue(params.backComSize, params.forwardComSize),  // 发射到执行的通信队列
+      cpu(_cpu),                                            // CPU指针
+      scheduler(params.scheduler),                          // 指令调度器
+      instQueue(_cpu, this, params),                       // 指令队列
+      ldstQueue(_cpu, this, params),                       // 加载存储队列
+      dispWidth(params.dispWidth),                         // 分派宽度
+      commitToIEWDelay(params.commitToIEWDelay),          // 提交到IEW的延迟
+      renameToIEWDelay(params.renameToIEWDelay),          // 重命名到IEW的延迟
+      enableDispatchStage(params.enableDispatchStage),    // 启用分派阶段
+      renameWidth(params.renameWidth),                     // 重命名宽度
+      wbNumInst(0),                                        // 写回指令数量
+      wbCycle(0),                                          // 写回周期
+      wbDelay(params.executeToWriteBackDelay),            // 执行到写回的延迟
+      wbWidth(params.wbWidth),                            // 写回宽度
+      enableStoreSetTrain(params.enable_storeSet_train),  // 启用存储集训练
+      numThreads(params.numThreads),                      // 线程数量
+      iewStats(cpu)                                        // 统计信息
 {
+    // 检查写回宽度是否超过编译时限制
     if (wbWidth > MaxWidth)
         fatal("wbWidth (%d) is larger than compiled limit (%d),\n"
              "\tincrease MaxWidth in src/cpu/o3/limits.hh\n",
              wbWidth, static_cast<int>(MaxWidth));
 
-    _status = Active;
-    exeStatus = Running;
-    wbStatus = Idle;
+    // 初始化IEW阶段各部分的状态
+    _status = Active;        // IEW整体状态为活跃
+    exeStatus = Running;     // 执行状态为运行中
+    wbStatus = Idle;         // 写回状态为空闲
 
-    // Setup wire to read instructions coming from issue.
+    // 建立从发射阶段读取指令的连接
     fromIssue = issueToExecQueue.getWire(0);
 
-    // Instruction queue needs the queue between issue and execute.
+    // 指令队列需要发射到执行之间的通信队列
     instQueue.setIssueToExecuteQueue(&issueToExecQueue);
 
+    // 初始化每个线程的状态
     for (ThreadID tid = 0; tid < MaxThreads; tid++) {
-        dispatchStatus[tid] = Running;
-        fetchRedirect[tid] = false;
+        dispatchStatus[tid] = Running;   // 分派状态为运行中
+        fetchRedirect[tid] = false;      // 取指重定向标志为false
     }
 
-    updateLSQNextCycle = false;
+    updateLSQNextCycle = false;  // 下一周期不更新LSQ
 
+    // 计算滑动缓冲区最大大小：(延迟+1) * 重命名宽度 * 2
     skidBufferMax = (renameToIEWDelay + 1) * params.renameWidth * 2;
 
+    // 调整分派停顿原因向量大小，初始化为无停顿
     dispatchStalls.resize(renameWidth, StallReason::NoStall);
 
 }
 
+// 获取IEW阶段的名称
+// 返回CPU名称加上".iew"后缀
 std::string
 IEW::name() const
 {
     return cpu->name() + ".iew";
 }
 
+// 注册探测点
+// 为性能分析和调试注册各种探测点
 void
 IEW::regProbePoints()
 {
+    // 分派探测点：当指令被分派到IEW时触发
     ppDispatch = new ProbePointArg<DynInstPtr>(
             cpu->getProbeManager(), "Dispatch");
+    // 错误预测探测点：当检测到分支预测错误时触发
     ppMispredict = new ProbePointArg<DynInstPtr>(
             cpu->getProbeManager(), "Mispredict");
-    /**
-     * Probe point with dynamic instruction as the argument used to probe when
-     * an instruction starts to execute.
-     */
+    // 执行探测点：当指令开始执行时触发
     ppExecute = new ProbePointArg<DynInstPtr>(
             cpu->getProbeManager(), "Execute");
-    /**
-     * Probe point with dynamic instruction as the argument used to probe when
-     * an instruction execution completes and it is marked ready to commit.
-     */
+    // 准备提交探测点：当指令执行完成并准备提交时触发
     ppToCommit = new ProbePointArg<DynInstPtr>(
             cpu->getProbeManager(), "ToCommit");
 }
 
+// IEW统计信息构造函数
+// 初始化IEW阶段的各种性能统计计数器
 IEW::IEWStats::IEWStats(CPU *cpu)
     : statistics::Group(cpu, "iew"),
     ADD_STAT(idleCycles, statistics::units::Cycle::get(),
-             "Number of cycles IEW is idle"),
+             "Number of cycles IEW is idle"),                        // IEW空闲周期数
     ADD_STAT(squashCycles, statistics::units::Cycle::get(),
-             "Number of cycles IEW is squashing"),
+             "Number of cycles IEW is squashing"),                   // IEW撤销周期数
     ADD_STAT(blockCycles, statistics::units::Cycle::get(),
-             "Number of cycles IEW is blocking"),
+             "Number of cycles IEW is blocking"),                    // IEW阻塞周期数
     ADD_STAT(unblockCycles, statistics::units::Cycle::get(),
-             "Number of cycles IEW is unblocking"),
+             "Number of cycles IEW is unblocking"),                  // IEW解除阻塞周期数
     ADD_STAT(dispatchedInsts, statistics::units::Count::get(),
-             "Number of instructions dispatched to IQ"),
+             "Number of instructions dispatched to IQ"),            // 分派到IQ的指令数
     ADD_STAT(dispSquashedInsts, statistics::units::Count::get(),
-             "Number of squashed instructions skipped by dispatch"),
+             "Number of squashed instructions skipped by dispatch"), // 分派时跳过的撤销指令数
     ADD_STAT(dispLoadInsts, statistics::units::Count::get(),
-             "Number of dispatched load instructions"),
+             "Number of dispatched load instructions"),              // 分派的加载指令数
     ADD_STAT(dispStoreInsts, statistics::units::Count::get(),
-             "Number of dispatched store instructions"),
+             "Number of dispatched store instructions"),             // 分派的存储指令数
     ADD_STAT(dispNonSpecInsts, statistics::units::Count::get(),
-             "Number of dispatched non-speculative instructions"),
+             "Number of dispatched non-speculative instructions"),  // 分派的非推测指令数
     ADD_STAT(iqFullEvents, statistics::units::Count::get(),
-             "Number of times the IQ has become full, causing a stall"),
+             "Number of times the IQ has become full, causing a stall"),    // IQ满造成停顿的次数
     ADD_STAT(lsqFullEvents, statistics::units::Count::get(),
-             "Number of times the LSQ has become full, causing a stall"),
+             "Number of times the LSQ has become full, causing a stall"),   // LSQ满造成停顿的次数
     ADD_STAT(memOrderViolationEvents, statistics::units::Count::get(),
-             "Number of memory order violations"),
+             "Number of memory order violations"),                   // 内存顺序冲突次数
     ADD_STAT(predictedTakenIncorrect, statistics::units::Count::get(),
-             "Number of branches that were predicted taken incorrectly"),
+             "Number of branches that were predicted taken incorrectly"),   // 错误预测为跳转的分支数
     ADD_STAT(predictedNotTakenIncorrect, statistics::units::Count::get(),
-             "Number of branches that were predicted not taken incorrectly"),
+             "Number of branches that were predicted not taken incorrectly"), // 错误预测为不跳转的分支数
     ADD_STAT(branchMispredicts, statistics::units::Count::get(),
-             "Number of branch mispredicts detected at execute",
+             "Number of branch mispredicts detected at execute",    // 执行阶段检测到的分支预测错误数
              predictedTakenIncorrect + predictedNotTakenIncorrect),
     ADD_STAT(dispDist, statistics::units::Count::get(),
-             "Number of branch mispredicts detected at execute"),
-    executedInstStats(cpu),
+             "Number of branch mispredicts detected at execute"),   // 分派分布统计
+    executedInstStats(cpu),                                    // 执行指令统计
     ADD_STAT(instsToCommit, statistics::units::Count::get(),
-             "Cumulative count of insts sent to commit"),
+             "Cumulative count of insts sent to commit"),           // 发送到提交的指令累计数
     ADD_STAT(writebackCount, statistics::units::Count::get(),
-             "Cumulative count of insts written-back"),
+             "Cumulative count of insts written-back"),             // 写回指令累计数
     ADD_STAT(producerInst, statistics::units::Count::get(),
-             "Number of instructions producing a value"),
+             "Number of instructions producing a value"),           // 产生值的指令数
     ADD_STAT(consumerInst, statistics::units::Count::get(),
-             "Number of instructions consuming a value"),
+             "Number of instructions consuming a value"),           // 消费值的指令数
     ADD_STAT(wbRate, statistics::units::Rate<
                 statistics::units::Count, statistics::units::Cycle>::get(),
-             "Insts written-back per cycle"),
+             "Insts written-back per cycle"),                       // 每周期写回指令数
     ADD_STAT(wbFanout, statistics::units::Rate<
                 statistics::units::Count, statistics::units::Count>::get(),
-             "Average fanout of values written-back"),
+             "Average fanout of values written-back"),              // 写回值的平均扇出数
     ADD_STAT(stallEvents, statistics::units::Count::get(),
-             "Number of events the IEW has stalled"),
+             "Number of events the IEW has stalled"),               // IEW停顿事件数
     ADD_STAT(fetchStallReason, statistics::units::Count::get(),
-             "Number of fetch stall reasons each tick (Total)"),
+             "Number of fetch stall reasons each tick (Total)"),   // 每周期取指停顿原因数
     ADD_STAT(decodeStallReason, statistics::units::Count::get(),
-             "Number of decode stall reasons each tick (Total)"),
+             "Number of decode stall reasons each tick (Total)"),  // 每周期译码停顿原因数
     ADD_STAT(renameStallReason, statistics::units::Count::get(),
-             "Number of rename stall reasons each tick (Total)"),
+             "Number of rename stall reasons each tick (Total)"),  // 每周期重命名停顿原因数
     ADD_STAT(dispatchStallReason, statistics::units::Count::get(),
-             "Number of dispatch stall reasons each tick (Total)")
+             "Number of dispatch stall reasons each tick (Total)") // 每周期分派停顿原因数
 {
     instsToCommit
         .init(cpu->numThreads)
@@ -320,27 +328,29 @@ IEW::IEWStats::IEWStats(CPU *cpu)
     }
 }
 
+// 执行指令统计信息构造函数
+// 初始化各种类型执行指令的统计计数器
 IEW::IEWStats::ExecutedInstStats::ExecutedInstStats(CPU *cpu)
     : statistics::Group(cpu, "executed_inst"),
     ADD_STAT(numInsts, statistics::units::Count::get(),
-             "Number of executed instructions"),
+             "Number of executed instructions"),                     // 执行指令总数
     ADD_STAT(numLoadInsts, statistics::units::Count::get(),
-             "Number of load instructions executed"),
+             "Number of load instructions executed"),                // 执行的加载指令数
     ADD_STAT(numSquashedInsts, statistics::units::Count::get(),
-             "Number of squashed instructions skipped in execute"),
+             "Number of squashed instructions skipped in execute"),  // 执行时跳过的撤销指令数
     ADD_STAT(numSwp, statistics::units::Count::get(),
-             "Number of swp insts executed"),
+             "Number of swp insts executed"),                        // 执行的交换指令数
     ADD_STAT(numNop, statistics::units::Count::get(),
-             "Number of nop insts executed"),
+             "Number of nop insts executed"),                        // 执行的空操作指令数
     ADD_STAT(numRefs, statistics::units::Count::get(),
-             "Number of memory reference insts executed"),
+             "Number of memory reference insts executed"),           // 执行的内存引用指令数
     ADD_STAT(numBranches, statistics::units::Count::get(),
-             "Number of branches executed"),
+             "Number of branches executed"),                         // 执行的分支指令数
     ADD_STAT(numStoreInsts, statistics::units::Count::get(),
-             "Number of stores executed"),
+             "Number of stores executed"),                           // 执行的存储指令数
     ADD_STAT(numRate, statistics::units::Rate<
                 statistics::units::Count, statistics::units::Cycle>::get(),
-             "Inst execution rate", numInsts / cpu->baseStats.numCycles)
+             "Inst execution rate", numInsts / cpu->baseStats.numCycles)  // 指令执行率
 {
     numLoadInsts
         .init(cpu->numThreads)
@@ -370,15 +380,20 @@ IEW::IEWStats::ExecutedInstStats::ExecutedInstStats(CPU *cpu)
         .flags(statistics::total);
 }
 
+// IEW启动阶段初始化
+// 在流水线启动时初始化IEW阶段的状态信息
 void
 IEW::startupStage()
 {
+    // 为每个线程初始化队列使用状态和可用条目数
     for (ThreadID tid = 0; tid < numThreads; tid++) {
-        toRename->iewInfo[tid].usedIQ = true;
+        toRename->iewInfo[tid].usedIQ = true;   // 标记指令队列已使用
 
-        toRename->iewInfo[tid].usedLSQ = true;
+        toRename->iewInfo[tid].usedLSQ = true;  // 标记加载存储队列已使用
+        // 获取加载队列空闲条目数
         toRename->iewInfo[tid].freeLQEntries =
             ldstQueue.numFreeLoadEntries(tid);
+        // 获取存储队列空闲条目数
         toRename->iewInfo[tid].freeSQEntries =
             ldstQueue.numFreeStoreEntries(tid);
     }
@@ -391,133 +406,167 @@ IEW::startupStage()
     cpu->activateStage(CPU::IEWIdx);
 }
 
+// 清空线程状态
+// 重置指定线程的IEW状态信息
 void
 IEW::clearStates(ThreadID tid)
 {
-    toRename->iewInfo[tid].usedIQ = true;
+    toRename->iewInfo[tid].usedIQ = true;   // 重置指令队列使用状态
 
-    toRename->iewInfo[tid].usedLSQ = true;
+    toRename->iewInfo[tid].usedLSQ = true;  // 重置加载存储队列使用状态
+    // 重置加载队列和存储队列的空闲条目数
     toRename->iewInfo[tid].freeLQEntries = ldstQueue.numFreeLoadEntries(tid);
     toRename->iewInfo[tid].freeSQEntries = ldstQueue.numFreeStoreEntries(tid);
 }
 
+// 设置时间缓冲区
+// 配置IEW阶段与其他流水线阶段通信的时间缓冲区
 void
 IEW::setTimeBuffer(TimeBuffer<TimeStruct> *tb_ptr)
 {
     timeBuffer = tb_ptr;
 
-    // Setup wire to read information from time buffer, from commit.
+    // 建立从提交阶段读取信息的连接（考虑延迟）
     fromCommit = timeBuffer->getWire(-commitToIEWDelay);
 
-    // Setup wire to write information back to previous stages.
-    toRename = timeBuffer->getWire(0);
+    // 建立向前级阶段写回信息的连接
+    toRename = timeBuffer->getWire(0);  // 向重命名阶段写回
 
-    toFetch = timeBuffer->getWire(0);
+    toFetch = timeBuffer->getWire(0);   // 向取指阶段写回
 
     // Instruction queue also needs main time buffer.
     instQueue.setTimeBuffer(tb_ptr);
 }
 
+// 设置重命名队列
+// 配置从重命名阶段读取指令的通信队列
 void
 IEW::setRenameQueue(TimeBuffer<RenameStruct> *rq_ptr)
 {
     renameQueue = rq_ptr;
 
-    // Setup wire to read information from rename queue.
+    // 建立从重命名队列读取信息的连接（考虑延迟）
     fromRename = renameQueue->getWire(-renameToIEWDelay);
 }
 
+// 设置IEW队列
+// 配置向提交阶段发送指令的通信队列
 void
 IEW::setIEWQueue(TimeBuffer<IEWStruct> *iq_ptr)
 {
     iewQueue = iq_ptr;
 
-    // Setup wire to write instructions to commit.
+    // 建立向提交阶段写入指令的连接
     toCommit = iewQueue->getWire(0);
 
-    execBypass = iewQueue->getWire(0);
-    execWB = iewQueue->getWire(-wbDelay);
+    // 设置执行旁路和写回连接
+    execBypass = iewQueue->getWire(0);      // 执行旁路连接
+    execWB = iewQueue->getWire(-wbDelay);   // 写回连接（考虑延迟）
 }
 
+// 设置活跃线程列表
+// 配置IEW阶段需要处理的活跃线程
 void
 IEW::setActiveThreads(std::list<ThreadID> *at_ptr)
 {
     activeThreads = at_ptr;
 
-    ldstQueue.setActiveThreads(at_ptr);
-    instQueue.setActiveThreads(at_ptr);
+    // 将活跃线程信息传递给子组件
+    ldstQueue.setActiveThreads(at_ptr);     // 设置加载存储队列的活跃线程
+    instQueue.setActiveThreads(at_ptr);     // 设置指令队列的活跃线程
 }
 
+// 设置计分板
+// 配置用于跟踪寄存器就绪状态的计分板
 void
 IEW::setScoreboard(Scoreboard *sb_ptr)
 {
-    scoreboard = sb_ptr;
+    scoreboard = sb_ptr;  // 设置计分板指针，用于寄存器依赖跟踪
 }
 
+// 检查IEW阶段是否已排空
+// 确认所有队列和缓冲区都已清空，用于系统排空操作
 bool
 IEW::isDrained() const
 {
+    // 检查加载存储队列和指令队列是否都已排空
     bool drained = ldstQueue.isDrained() && instQueue.isDrained();
 
+    // 检查每个线程的状态
     for (ThreadID tid = 0; tid < numThreads; tid++) {
+        // 检查指令缓冲区是否为空
         if (!insts[tid].empty()) {
             DPRINTF(Drain, "%i: Insts not empty.\n", tid);
             drained = false;
         }
+        // 检查滑动缓冲区是否为空
         if (!skidBuffer[tid].empty()) {
             DPRINTF(Drain, "%i: Skid buffer not empty.\n", tid);
             drained = false;
         }
+        // 检查分派状态是否为运行中
         drained = drained && dispatchStatus[tid] == Running;
     }
 
-    return drained;
+    return drained;  // 只有所有条件满足时才认为已排空
 }
 
+// 排空健全性检查
+// 验证IEW阶段是否正确排空，用于调试
 void
 IEW::drainSanityCheck() const
 {
-    assert(isDrained());
+    assert(isDrained());  // 断言IEW已经排空
 
+    // 检查指令队列和加载存储队列的排空状态
     instQueue.drainSanityCheck();
     ldstQueue.drainSanityCheck();
 }
 
+// 接管IEW阶段控制
+// 在CPU切换或重启时重置IEW阶段的所有状态
 void
 IEW::takeOverFrom()
 {
-    // Reset all state.
-    _status = Active;
-    exeStatus = Running;
-    wbStatus = Idle;
+    // 重置所有状态
+    _status = Active;     // IEW整体状态为活跃
+    exeStatus = Running;  // 执行状态为运行中
+    wbStatus = Idle;      // 写回状态为空闲
 
+    // 让子组件接管控制
     instQueue.takeOverFrom();
     ldstQueue.takeOverFrom();
 
+    // 启动阶段初始化
     startupStage();
-    cpu->activityThisCycle();
+    cpu->activityThisCycle();  // 标记CPU本周期活跃
 
+    // 重置所有线程的状态
     for (ThreadID tid = 0; tid < numThreads; tid++) {
-        dispatchStatus[tid] = Running;
-        fetchRedirect[tid] = false;
+        dispatchStatus[tid] = Running;  // 分派状态为运行中
+        fetchRedirect[tid] = false;     // 取指重定向标志为false
     }
 
-    updateLSQNextCycle = false;
+    updateLSQNextCycle = false;  // 不在下周期更新LSQ
 
+    // 清空发射到执行的通信队列
     for (int i = 0; i < issueToExecQueue.getSize(); ++i) {
         issueToExecQueue.advance();
     }
 }
 
+// 撤销指定线程的所有指令
+// 当检测到分支预测错误或异常时撤销后续指令
 void
 IEW::squash(ThreadID tid)
 {
     DPRINTF(IEW, "[tid:%i] Squashing all instructions.\n", tid);
 
+    // 撤销分派队列中序列号大于已提交指令的所有指令
     for (auto& dp : dispQue) {
         for (auto& it : dp) {
             if (it->seqNum > fromCommit->commitInfo[tid].doneSeqNum) {
-                it->setSquashed();
+                it->setSquashed();  // 标记指令为已撤销
             }
         }
     }
@@ -552,6 +601,8 @@ IEW::squash(ThreadID tid)
     emptyRenameInsts(tid);
 }
 
+// 因分支预测错误而撤销
+// 当检测到分支预测错误时，设置撤销信息并通知其他阶段
 void
 IEW::squashDueToBranch(const DynInstPtr& inst, ThreadID tid)
 {
@@ -559,22 +610,24 @@ IEW::squashDueToBranch(const DynInstPtr& inst, ThreadID tid)
             " PC: %s "
             "\n", tid, inst->seqNum, inst->pcState() );
 
+    // 如果没有正在进行的撤销或当前指令序列号更小，则开始新的撤销
     if (!execWB->squash[tid] ||
             inst->seqNum < execWB->squashedSeqNum[tid]) {
-        execWB->squash[tid] = true;
-        execWB->squashedSeqNum[tid] = inst->seqNum;
-        execWB->squashedStreamId[tid] = inst->getFsqId();
-        execWB->squashedTargetId[tid] = inst->getFtqId();
-        execWB->squashedLoopIter[tid] = inst->getLoopIteration();
-        execWB->branchTaken[tid] = inst->pcState().branching();
+        execWB->squash[tid] = true;                           // 设置撤销标志
+        execWB->squashedSeqNum[tid] = inst->seqNum;          // 撤销起始序列号
+        execWB->squashedStreamId[tid] = inst->getFsqId();    // 获取FSQ ID
+        execWB->squashedTargetId[tid] = inst->getFtqId();    // 获取FTQ ID
+        execWB->squashedLoopIter[tid] = inst->getLoopIteration(); // 循环迭代次数
+        execWB->branchTaken[tid] = inst->pcState().branching(); // 分支是否跳转
 
+        // 设置正确的PC值
         set(execWB->pc[tid], inst->pcState());
         inst->staticInst->advancePC(*execWB->pc[tid]);
 
-        execWB->mispredictInst[tid] = inst;
-        execWB->includeSquashInst[tid] = false;
+        execWB->mispredictInst[tid] = inst;        // 错误预测的指令
+        execWB->includeSquashInst[tid] = false;    // 不包括撤销指令本身
 
-        wroteToTimeBuffer = true;
+        wroteToTimeBuffer = true;  // 标记已写入时间缓冲区
 
         DPRINTF(DecoupleBP,
                 "Branch misprediction (pc=%#lx) set stream id to %lu, target "
@@ -587,32 +640,31 @@ IEW::squashDueToBranch(const DynInstPtr& inst, ThreadID tid)
 
 }
 
+// 因内存序冲突而撤销
+// 当检测到内存序冲突时，撤销冲突指令及其后续指令
 void
 IEW::squashDueToMemOrder(const DynInstPtr& inst, ThreadID tid)
 {
     DPRINTF(IEW, "[tid:%i] Memory violation, squashing violator and younger "
             "insts, PC: %s [sn:%llu].\n", tid, inst->pcState(), inst->seqNum);
-    // Need to include inst->seqNum in the following comparison to cover the
-    // corner case when a branch misprediction and a memory violation for the
-    // same instruction (e.g. load PC) are detected in the same cycle.  In this
-    // case the memory violator should take precedence over the branch
-    // misprediction because it requires the violator itself to be included in
-    // the squash.
+    // 需要在比较中包含inst->seqNum来处理角落情况：
+    // 当分支预测错误和内存冲突在同一周期对同一指令检测到时，
+    // 内存冲突应该优先于分支预测错误，因为它需要将冲突指令本身包含在撤销中
     if (!execWB->squash[tid] ||
             inst->seqNum <= execWB->squashedSeqNum[tid]) {
-        execWB->squash[tid] = true;
+        execWB->squash[tid] = true;  // 设置撤销标志
 
-        execWB->squashedSeqNum[tid] = inst->seqNum;
-        execWB->squashedStreamId[tid] = inst->getFsqId();
-        execWB->squashedTargetId[tid] = inst->getFtqId();
-        execWB->squashedLoopIter[tid] = inst->getLoopIteration();
-        set(execWB->pc[tid], inst->pcState());
-        execWB->mispredictInst[tid] = NULL;
+        execWB->squashedSeqNum[tid] = inst->seqNum;          // 撤销起始序列号
+        execWB->squashedStreamId[tid] = inst->getFsqId();    // FSQ ID
+        execWB->squashedTargetId[tid] = inst->getFtqId();    // FTQ ID
+        execWB->squashedLoopIter[tid] = inst->getLoopIteration(); // 循环迭代
+        set(execWB->pc[tid], inst->pcState());               // 设置PC
+        execWB->mispredictInst[tid] = NULL;                  // 清空错误预测指令
 
-        // Must include the memory violator in the squash.
+        // 内存冲突必须包含冲突指令本身在撤销中
         execWB->includeSquashInst[tid] = true;
 
-        wroteToTimeBuffer = true;
+        wroteToTimeBuffer = true;  // 标记已写入时间缓冲区
 
         DPRINTF(DecoupleBP,
                 "Memory violation (pc=%#lx) set stream id to %lu, target id "
@@ -626,74 +678,91 @@ IEW::squashDueToMemOrder(const DynInstPtr& inst, ThreadID tid)
     }
 }
 
+// 阻塞指定线程的IEW阶段
+// 当资源不足时阻塞线程，将指令缓存到滑动缓冲区
 void
 IEW::block(ThreadID tid)
 {
     DPRINTF(IEW, "[tid:%i] Blocking.\n", tid);
 
+    // 如果当前不是阻塞状态，通知重命名阶段
     if (dispatchStatus[tid] != Blocked &&
         dispatchStatus[tid] != Unblocking) {
-        toRename->iewBlock[tid] = true;
-        wroteToTimeBuffer = true;
+        toRename->iewBlock[tid] = true;  // 设置阻塞信号
+        wroteToTimeBuffer = true;        // 标记写入了时间缓冲区
     }
 
-    // Add the current inputs to the skid buffer so they can be
-    // reprocessed when this stage unblocks.
+    // 将当前输入的指令添加到滑动缓冲区
+    // 这样在解除阻塞时可以重新处理这些指令
     skidInsert(tid);
 
-    dispatchStatus[tid] = Blocked;
+    dispatchStatus[tid] = Blocked;  // 设置分派状态为阻塞
 }
 
+// 解除阻塞指定线程的IEW阶段
+// 从滑动缓冲区读取指令并恢复正常处理
 void
 IEW::unblock(ThreadID tid)
 {
     DPRINTF(IEW, "[tid:%i] Reading instructions out of the skid "
             "buffer %u.\n",tid, tid);
 
-    // If the skid bufffer is empty, signal back to previous stages to unblock.
-    // Also switch status to running.
+    // 如果滑动缓冲区已空，向前级阶段发送解除阻塞信号
+    // 同时切换状态为运行中
     if (skidBuffer[tid].empty()) {
-        toRename->iewUnblock[tid] = true;
-        wroteToTimeBuffer = true;
+        toRename->iewUnblock[tid] = true;  // 通知重命名阶段解除阻塞
+        wroteToTimeBuffer = true;          // 标记写入了时间缓冲区
         DPRINTF(IEW, "[tid:%i] Done unblocking.\n",tid);
-        dispatchStatus[tid] = Running;
+        dispatchStatus[tid] = Running;     // 设置分派状态为运行中
     }
 }
 
+// 唤醒依赖指令
+// 当指令完成执行后，唤醒依赖于该指令的其他指令
 void
 IEW::wakeDependents(const DynInstPtr& inst)
 {
-    instQueue.wakeDependents(inst);
+    instQueue.wakeDependents(inst);  // 通知指令队列唤醒依赖指令
 }
 
+// 重新调度内存指令
+// 当内存指令需要重新调度时调用
 void
 IEW::rescheduleMemInst(const DynInstPtr& inst)
 {
-    instQueue.rescheduleMemInst(inst);
+    instQueue.rescheduleMemInst(inst);  // 通知指令队列重新调度内存指令
 }
 
+// 重放内存指令
+// 当内存指令需要重新执行时调用
 void
 IEW::replayMemInst(const DynInstPtr& inst)
 {
-    instQueue.replayMemInst(inst);
+    instQueue.replayMemInst(inst);  // 通知指令队列重放内存指令
 }
 
+// 阻塞内存指令
+// 当内存指令遇到阻塞条件时调用
 void
 IEW::blockMemInst(const DynInstPtr& inst)
 {
-    instQueue.blockMemInst(inst);
+    instQueue.blockMemInst(inst);  // 通知指令队列阻塞内存指令
 }
 
+// 缓存缺失加载指令重放
+// 当加载指令发生缓存缺失时需要重放
 void
 IEW::cacheMissLdReplay(const DynInstPtr& inst)
 {
-    instQueue.cacheMissLdReplay(inst);
+    instQueue.cacheMissLdReplay(inst);  // 通知指令队列处理缓存缺失重放
 }
 
+// 缓存解除阻塞
+// 当缓存阻塞解除时调用
 void
 IEW::cacheUnblocked()
 {
-    instQueue.cacheUnblocked();
+    instQueue.cacheUnblocked();  // 通知指令队列缓存已解除阻塞
 }
 
 void
@@ -733,6 +802,8 @@ IEW::readyToFinish(const DynInstPtr& inst)
     (*iewQueue)[wbCycle].size++;
 }
 
+// 将指令插入滑动缓冲区
+// 在IEW阶段阻塞时，将当前处理的指令保存到滑动缓冲区
 void
 IEW::skidInsert(ThreadID tid)
 {
@@ -754,6 +825,8 @@ IEW::skidInsert(ThreadID tid)
            "Skidbuffer Exceeded Max Size");
 }
 
+// 获取滑动缓冲区最大深度
+// 返回所有线程中滑动缓冲区的最大条目数
 int
 IEW::skidCount()
 {
@@ -762,32 +835,38 @@ IEW::skidCount()
     std::list<ThreadID>::iterator threads = activeThreads->begin();
     std::list<ThreadID>::iterator end = activeThreads->end();
 
+    // 遍历所有活跃线程，找到滑动缓冲区最大深度
     while (threads != end) {
         ThreadID tid = *threads++;
         unsigned thread_count = skidBuffer[tid].size();
         if (max < thread_count)
-            max = thread_count;
+            max = thread_count;  // 更新最大深度
     }
 
-    return max;
+    return max;  // 返回最大深度
 }
 
+// 检查所有滑动缓冲区是否为空
+// 只有当所有线程的滑动缓冲区都为空时才返回true
 bool
 IEW::skidsEmpty()
 {
     std::list<ThreadID>::iterator threads = activeThreads->begin();
     std::list<ThreadID>::iterator end = activeThreads->end();
 
+    // 检查每个线程的滑动缓冲区
     while (threads != end) {
         ThreadID tid = *threads++;
 
         if (!skidBuffer[tid].empty())
-            return false;
+            return false;  // 只要有一个不为空就返回false
     }
 
-    return true;
+    return true;  // 所有缓冲区都为空
 }
 
+// 更新IEW阶段状态
+// 根据各线程状态更新IEW整体状态
 void
 IEW::updateStatus()
 {
@@ -796,11 +875,12 @@ IEW::updateStatus()
     std::list<ThreadID>::iterator threads = activeThreads->begin();
     std::list<ThreadID>::iterator end = activeThreads->end();
 
+    // 检查是否有线程处于解除阻塞状态
     while (threads != end) {
         ThreadID tid = *threads++;
 
         if (dispatchStatus[tid] == Unblocking) {
-            any_unblocking = true;
+            any_unblocking = true;  // 发现有线程在解除阻塞
             break;
         }
     }
@@ -842,26 +922,30 @@ IEW::checkStall(ThreadID tid)
     return ret_val;
 }
 
+// 检查信号并更新状态
+// 处理来自提交阶段的撤销和停顿信号，更新分派状态
 void
 IEW::checkSignalsAndUpdate(ThreadID tid)
 {
-    // Check if there's a squash signal, squash if there is
-    // Check stall signals, block if there is.
-    // If status was Blocked
-    //     if so then go to unblocking
-    // If status was Squashing
-    //     check if squashing is not high.  Switch to running this cycle.
+    // 处理逻辑：
+    // 1. 检查是否有撤销信号，如果有则执行撤销
+    // 2. 检查停顿信号，如果有则阻塞
+    // 3. 如果状态是阻塞，则转向解除阻塞
+    // 4. 如果状态是撤销中，检查撤销是否结束，切换到运行状态
 
+    // 检查提交阶段的撤销信号
     if (fromCommit->commitInfo[tid].squash) {
-        squash(tid);
+        squash(tid);  // 执行撤销操作
+        // 更新本地撤销版本号
         localSquashVer.update(fromCommit->commitInfo[tid].squashVersion.getVersion());
         DPRINTF(IEW, "Updating squash version to %u\n",
                 localSquashVer.getVersion());
 
+        // 如果当前处于阻塞或解除阻塞状态，通知重命名阶段解除阻塞
         if (dispatchStatus[tid] == Blocked ||
             dispatchStatus[tid] == Unblocking) {
-            toRename->iewUnblock[tid] = true;
-            wroteToTimeBuffer = true;
+            toRename->iewUnblock[tid] = true;  // 解除阻塞信号
+            wroteToTimeBuffer = true;          // 标记写入时间缓冲区
         }
 
         dispatchStatus[tid] = Squashing;
@@ -912,64 +996,81 @@ IEW::checkSignalsAndUpdate(ThreadID tid)
     }
 }
 
+// 对来自重命名的指令进行排序
+// 按线程ID对指令进行分类，检查撤销版本
 void
 IEW::sortInsts()
 {
-    int insts_from_rename = fromRename->size;
+    int insts_from_rename = fromRename->size;  // 来自重命名的指令数量
 #ifdef DEBUG
+    // 调试模式下确保指令缓冲区为空
     for (ThreadID tid = 0; tid < numThreads; tid++)
         assert(insts[tid].empty());
 #endif
+    // 处理每个来自重命名的指令
     for (int i = 0; i < insts_from_rename; ++i) {
         const DynInstPtr &inst = fromRename->insts[i];
+        // 如果本地撤销版本比指令版本新，标记为撤销
         if (localSquashVer.largerThan(inst->getVersion())) {
-            inst->setSquashed();
+            inst->setSquashed();  // 设置指令为已撤销
         }
         insts[fromRename->insts[i]->threadNumber].push_back(inst);
     }
 }
 
+// 清空来自重命名的指令
+// 移除所有从重命名阶段传来的指令，并更新统计
 void
 IEW::emptyRenameInsts(ThreadID tid)
 {
     DPRINTF(IEW, "[tid:%i] Removing incoming rename instructions\n", tid);
 
+    // 遍历并清空所有来自重命名阶段的指令
     while (!insts[tid].empty()) {
-
+        // 统计加载指令数
         if (insts[tid].front()->isLoad()) {
             toRename->iewInfo[tid].dispatchedToLQ++;
         }
+        // 统计存储和原子指令数
         if (insts[tid].front()->isStore() ||
             insts[tid].front()->isAtomic()) {
             toRename->iewInfo[tid].dispatchedToSQ++;
         }
 
-        toRename->iewInfo[tid].dispatched++;
+        toRename->iewInfo[tid].dispatched++;  // 统计总分派指令数
 
-        insts[tid].pop_front();
+        insts[tid].pop_front();  // 移除指令
     }
 }
 
+// 唤醒CPU
+// 通知CPU有任务需要处理
 void
 IEW::wakeCPU()
 {
-    cpu->wakeCPU();
+    cpu->wakeCPU();  // 唤醒CPU进行处理
 }
 
+// 标记本周期有活动
+// 通知CPU在这个周期有活动发生
 void
 IEW::activityThisCycle()
 {
     DPRINTF(Activity, "Activity this cycle.\n");
-    cpu->activityThisCycle();
+    cpu->activityThisCycle();  // 通知CPU本周期有活动
 }
 
+// 激活IEW阶段
+// 通知CPU激活IEW阶段
 void
 IEW::activateStage()
 {
     DPRINTF(Activity, "Activating stage.\n");
-    cpu->activateStage(CPU::IEWIdx);
+    cpu->activateStage(CPU::IEWIdx);  // 激活IEW阶段
 }
 
+// 去激活IEW阶段
+// 通知CPU去激活IEW阶段
 void
 IEW::deactivateStage()
 {
@@ -977,15 +1078,17 @@ IEW::deactivateStage()
     cpu->deactivateStage(CPU::IEWIdx);
 }
 
+// 分派指定线程的指令
+// 将来自重命名阶段的指令分派到指令队列和加载存储队列
 void
 IEW::dispatch(ThreadID tid)
 {
-    // If status is Running or idle,
-    //     call dispatchInsts()
-    // If status is Unblocking,
-    //     buffer any instructions coming from rename
-    //     continue trying to empty skid buffer
-    //     check if stall conditions have passed
+    // 分派逻辑：
+    // 如果状态是Running或idle：调用dispatchInsts()
+    // 如果状态是Unblocking：
+    //     缓存来自重命名的指令
+    //     继续尝试清空滑动缓冲区
+    //     检查停顿条件是否已经过去
 
     if (dispatchStatus[tid] == Blocked) {
         ++iewStats.blockCycles;
@@ -1099,6 +1202,20 @@ IEW::dispatchInstFromRename(ThreadID tid)
             if ((inst->isAtomic() && ldstQueue.sqFull(tid)) || (inst->isLoad() && ldstQueue.lqFull(tid)) ||
                 (inst->isStore() && ldstQueue.sqFull(tid))) {
                 DPRINTF(IEW, "[tid:%i] Dispatch: %s has become full.\n", tid, inst->isLoad() ? "LQ" : "SQ");
+
+                iewStats.stallEvents[LSQFull]++;
+
+                ++iewStats.lsqFullEvents;
+                dispatch_stalls.push(checkDispatchStall(tid, NumDQ, inst, disp_seq));
+                breakDispatch = dispatch_stalls.back();
+                blockReason = breakDispatch;
+                break;
+            }
+
+            // Check VLMergeBuffer if inst is vector memory operation
+            if (inst->isVector() && (inst->isLoad() || inst->isStore()) &&
+                ldstQueue.vlMergeBufferBlocked(tid)) {
+                DPRINTF(IEW, "[tid:%i] Dispatch: VLMergeBuffer is blocked.\n", tid);
 
                 iewStats.stallEvents[LSQFull]++;
 
@@ -1259,6 +1376,8 @@ IEW::dispatchInstFromRename(ThreadID tid)
 
 }
 
+// 将指令分类到分派队列
+// 根据指令类型将指令分类并添加到相应的分派队列中
 void
 IEW::classifyInstToDispQue(ThreadID tid)
 {
@@ -1431,6 +1550,17 @@ IEW::dispatchInstFromDispQue(ThreadID tid)
                 (inst->isStore() && ldstQueue.sqFull(tid))) {
                 DPRINTF(IEW, "[tid:%i] Dispatch: %s has become full.\n",tid,
                         inst->isLoad() ? "LQ" : "SQ");
+
+                iewStats.stallEvents[LSQFull]++;
+
+                ++iewStats.lsqFullEvents;
+                break;
+            }
+
+            // Check VLMergeBuffer if inst is vector memory operation
+            if (inst->isVector() && (inst->isLoad() || inst->isStore()) &&
+                ldstQueue.vlMergeBufferBlocked(tid)) {
+                DPRINTF(IEW, "[tid:%i] Dispatch: VLMergeBuffer is blocked.\n", tid);
 
                 iewStats.stallEvents[LSQFull]++;
 
@@ -1638,18 +1768,23 @@ IEW::SquashCheckAfterExe(DynInstPtr inst)
     }
 }
 
+// 执行指令
+// 从功能单元获取已完成的指令并处理写回
 void
 IEW::executeInsts()
 {
-    wbNumInst = 0;
-    wbCycle = 0;
+    // 初始化写回计数器
+    wbNumInst = 0;  // 本周期写回指令数
+    wbCycle = 0;    // 写回周期计数
 
+    // 遍历所有活跃线程
     std::list<ThreadID>::iterator threads = activeThreads->begin();
     std::list<ThreadID>::iterator end = activeThreads->end();
 
+    // 重置每个线程的取指重定向标志
     while (threads != end) {
         ThreadID tid = *threads++;
-        fetchRedirect[tid] = false;
+        fetchRedirect[tid] = false;  // 清除取指重定向标志
     }
 
     // Uncomment this if you want to see all available instructions.
@@ -1795,6 +1930,8 @@ IEW::executeInsts()
 
 }
 
+// 写回已完成执行的指令
+// 将执行完成的指令写回到重命名阶段并更新计分板
 void
 IEW::writebackInsts()
 {
@@ -1852,9 +1989,12 @@ IEW::writebackInsts()
     }
 }
 
+// IEW阶段时钟周期处理
+// IEW阶段每个周期的主要处理逻辑
 void
 IEW::tick()
 {
+    // 统计各阶段的停顿原因
     for (int i = 0;i < fromRename->fetchStallReason.size();i++) {
         iewStats.fetchStallReason[fromRename->fetchStallReason[i]]++;
     }
@@ -1867,15 +2007,19 @@ IEW::tick()
         iewStats.renameStallReason[fromRename->renameStallReason[i]]++;
     }
 
-    wbNumInst = 0;
-    wbCycle = 0;
+    // 初始化本周期的写回计数器
+    wbNumInst = 0;  // 写回指令数
+    wbCycle = 0;    // 写回周期
 
-    wroteToTimeBuffer = false;
-    updatedQueues = false;
+    // 重置通信标志
+    wroteToTimeBuffer = false;  // 是否写入时间缓冲区
+    updatedQueues = false;      // 是否更新了队列
 
+    // 调用调度器和加载存储队列的时钟处理
     scheduler->tick();
     ldstQueue.tick();
 
+    // 对指令进行排序
     sortInsts();
 
     std::list<ThreadID>::iterator threads = activeThreads->begin();
@@ -1999,24 +2143,23 @@ IEW::tick()
     }
 }
 
+// 更新执行指令统计信息
+// 根据指令类型更新相应的执行统计计数器
 void
 IEW::updateExeInstStats(const DynInstPtr& inst)
 {
     ThreadID tid = inst->threadNumber;
 
+    // 总执行指令数加1
     iewStats.executedInstStats.numInsts++;
 
-    //
-    //  Control operations
-    //
+    // 控制指令统计
     if (inst->isControl())
-        iewStats.executedInstStats.numBranches[tid]++;
+        iewStats.executedInstStats.numBranches[tid]++;  // 分支指令数
 
-    //
-    //  Memory operations
-    //
+    // 内存操作指令统计
     if (inst->isMemRef()) {
-        iewStats.executedInstStats.numRefs[tid]++;
+        iewStats.executedInstStats.numRefs[tid]++;      // 内存引用指令数
 
         if (inst->isLoad()) {
             iewStats.executedInstStats.numLoadInsts[tid]++;
@@ -2024,17 +2167,20 @@ IEW::updateExeInstStats(const DynInstPtr& inst)
     }
 }
 
+// 检查分支预测错误
+// 检测分支指令是否被错误预测，如果是则触发撤销操作
 void
 IEW::checkMisprediction(const DynInstPtr& inst)
 {
     ThreadID tid = inst->threadNumber;
 
+    // 如果当前没有重定向或者当前指令序列号更大，则检查预测错误
     if (!fetchRedirect[tid] ||
         !execWB->squash[tid] ||
         execWB->squashedSeqNum[tid] > inst->seqNum) {
 
         if (inst->mispredicted()) {
-            fetchRedirect[tid] = true;
+            fetchRedirect[tid] = true;  // 设置取指重定向标志
 
             DPRINTF(IEW, "[tid:%i] [sn:%llu] Execute: "
                     "Branch mispredict detected.\n",
@@ -2044,52 +2190,66 @@ IEW::checkMisprediction(const DynInstPtr& inst)
             DPRINTF(IEW, "[tid:%i] [sn:%llu] Execute: "
                     "Redirecting fetch to PC: %s\n",
                     tid, inst->seqNum, inst->pcState());
-            // If incorrect, then signal the ROB that it must be squashed.
+            // 如果预测错误，通知ROB执行撤销操作
             squashDueToBranch(inst, tid);
 
+            // 更新预测错误统计
             if (inst->readPredTaken()) {
-                iewStats.predictedTakenIncorrect++;
+                iewStats.predictedTakenIncorrect++;     // 错误预测为跳转
             } else {
-                iewStats.predictedNotTakenIncorrect++;
+                iewStats.predictedNotTakenIncorrect++;  // 错误预测为不跳转
             }
         }
     }
 }
 
+// 取消加载指令
+// 当加载指令发生缓存缺失时取消其依赖指令
 void
 IEW::loadCancel(const DynInstPtr &inst)
 {
-    scheduler->loadCancel(inst);
+    scheduler->loadCancel(inst);  // 通知调度器取消加载指令
 }
 
+// 存储到加载转发失败重放
+// 当存储到加载转发失败时重放加载指令
 void
 IEW::stlfFailLdReplay(const DynInstPtr &inst, const InstSeqNum &store_seq_num)
 {
-    instQueue.stlfFailLdReplay(inst, store_seq_num);
+    instQueue.stlfFailLdReplay(inst, store_seq_num);  // 通知指令队列处理STLF失败
 }
 
+// 获取指令队列中的指令数
+// 返回当前指令队列中的指令总数
 uint32_t
 IEW::getIQInsts()
 {
-    return scheduler->getIQInsts();
+    return scheduler->getIQInsts();  // 从调度器获取指令数
 }
 
+// 设置所有停顿原因
+// 将所有分派停顿原因设置为指定的停顿类型
 void
 IEW::setAllStalls(StallReason dispatchStall)
 {
+    // 设置所有分派位置的停顿原因
     for (int i = 0;i < dispatchStalls.size();i++) {
         dispatchStalls.at(i) = dispatchStall;
     }
 }
 
+// 检查加载存储指令状态
+// 检查指令的各种状态，返回相应的停顿原因
 StallReason
 IEW::checkLoadStoreInst(DynInstPtr inst)
 {
+    // 检查指令是否已被撤销
     if (inst->isSquashed()) {
-        return StallReason::MemSquashed;
+        return StallReason::MemSquashed;  // 内存指令被撤销
     }
+    // 检查指令是否已提交
     if (inst->isCommitted()) {
-        return StallReason::MemCommitRateLimit;
+        return StallReason::MemCommitRateLimit;  // 内存指令提交速率限制
     }
     if (inst->isAtomic() || inst->isStoreConditional()) {
         return StallReason::Atomic;

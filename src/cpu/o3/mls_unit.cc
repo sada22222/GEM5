@@ -880,7 +880,7 @@ MlsUnit::buildReplayState(const StageState &state) const
     replay_state.asid = state.asid;
     replay_state.cause = state.replayCause;
     replay_state.translationComplete =
-        state.fault == NoFault && state.request != nullptr;
+        state.fault == NoFault && state.request && state.request->hasPaddr();
     replay_state.translationFault = state.fault != NoFault;
     if (state.request) {
         replay_state.requestFlags = state.request->getFlags();

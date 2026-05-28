@@ -46,7 +46,7 @@
 
 ## Remaining Items
 
-- Remove the temporary DRAMsim3 symlink before final git-clean handoff; it must not be committed.
+- Temporary DRAMsim3 symlink was removed before final git-clean handoff; it must not be committed in future runs.
 - Full pageable/asynchronous translation behavior is not proven by this bare/direct-path workload; current MLS still uses `translateAtomic()`, so this round only contracts replay semantics around completed translations and named pending causes.
 - SE `gemm_precomp` remains a later regression target because the plan did not identify its binary path.
 - Do not implement CUTE `LocalMMU` / GEM5 `LocalMmuModel` behavior changes in this flow; that layer is not where RTL TLB translation happens.

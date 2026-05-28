@@ -1169,11 +1169,12 @@ LSQUnit::issueMatrixMem(const DynInstPtr &inst)
 }
 
 bool
-LSQUnit::matrixReplayReady(const MlsReplayQueue::ReplayState &state) const
+LSQUnit::matrixReplayReady(
+    const DynInstPtr &inst, MlsReplayQueue::ReplayState &state) const
 {
     panic_if(!mlsUnit.has_value(),
              "Matrix MLS execution helper is not initialized for replay check");
-    return mlsUnit->replayReady(state);
+    return mlsUnit->replayReady(inst, state);
 }
 
 Fault

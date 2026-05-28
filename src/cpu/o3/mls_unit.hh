@@ -80,6 +80,8 @@ class MlsReplayQueue
         RegVal tile0 = 0;
         RegVal tile1 = 0;
         BaseMMU::Mode mode = BaseMMU::Read;
+        unsigned accessSize = 0;
+        RequestPtr request;
         Request::Flags requestFlags = {};
         uint16_t asid = 0;
         bool translationComplete = false;
@@ -108,7 +110,7 @@ class MlsReplayQueue
         const DynInstPtr &inst, const ReplayState &state, bool ready);
     void refreshReady(
         ThreadID tid,
-        const std::function<bool(const ReplayState &)> &ready_fn);
+        const std::function<bool(const DynInstPtr &, ReplayState &)> &ready_fn);
     bool scheduleNext(ThreadID tid, DynInstPtr &inst_out);
     bool completeRetry(const DynInstPtr &inst);
     unsigned squash(ThreadID tid, InstSeqNum squash_seq);
@@ -143,7 +145,8 @@ class MlsUnit
     void setVirtualQueue(MlsVirtualQueue *queue) { virtualQueue = queue; }
     void setReplayQueue(MlsReplayQueue *queue) { replayQueue = queue; }
     IssueResult issue(const DynInstPtr &inst);
-    bool replayReady(const MlsReplayQueue::ReplayState &state) const;
+    bool replayReady(const DynInstPtr &inst,
+                     MlsReplayQueue::ReplayState &state) const;
 
   private:
     struct StageState;
@@ -152,7 +155,8 @@ class MlsUnit
     Fault matrixMemEarlyFault(const DynInstPtr &inst,
                               const StageState &state) const;
     void probeTlbState(StageState &state) const;
-    bool ensureReplayReady(const MlsReplayQueue::ReplayState &state) const;
+    bool ensureReplayReady(const DynInstPtr &inst,
+                           MlsReplayQueue::ReplayState &state) const;
     void deriveStage0Shape(const DynInstPtr &inst, StageState &state) const;
     void captureStage0(const DynInstPtr &inst, StageState &state) const;
     void restoreStage0FromReplay(

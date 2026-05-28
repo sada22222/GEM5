@@ -341,7 +341,8 @@ class LSQUnit
     void issueToStorePipe(const DynInstPtr &inst);
 
     MlsUnit::IssueResult issueMatrixMem(const DynInstPtr &inst);
-    bool matrixReplayReady(const MlsReplayQueue::ReplayState &state) const;
+    bool matrixReplayReady(const DynInstPtr &inst,
+                           MlsReplayQueue::ReplayState &state) const;
 
     /** Commits the head load. */
     void commitLoad();

@@ -757,8 +757,9 @@ LSQ::scheduleMatrixMemReplay()
     for (auto tid : *activeThreads) {
         mlsReplayQueue.refreshReady(
             tid,
-            [this, tid](const MlsReplayQueue::ReplayState &state) {
-                return thread[tid].matrixReplayReady(state);
+            [this, tid](const DynInstPtr &inst,
+                        MlsReplayQueue::ReplayState &state) {
+                return thread[tid].matrixReplayReady(inst, state);
             });
 
         DynInstPtr replay_inst;

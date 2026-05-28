@@ -68,7 +68,7 @@ class MlsReplayQueue
     enum class ReplayCause : uint8_t
     {
         None = 0,
-        TlbMissPending,
+        TranslationResultPending,
     };
 
     struct ReplayState
@@ -83,6 +83,7 @@ class MlsReplayQueue
         Request::Flags requestFlags = {};
         uint16_t asid = 0;
         bool translationComplete = false;
+        bool translationFault = false;
     };
 
     struct Entry
@@ -151,7 +152,6 @@ class MlsUnit
     Fault matrixMemEarlyFault(const DynInstPtr &inst,
                               const StageState &state) const;
     void probeTlbState(StageState &state) const;
-    bool replayTlbReady(const MlsReplayQueue::ReplayState &state) const;
     bool ensureReplayReady(const MlsReplayQueue::ReplayState &state) const;
     void deriveStage0Shape(const DynInstPtr &inst, StageState &state) const;
     void captureStage0(const DynInstPtr &inst, StageState &state) const;

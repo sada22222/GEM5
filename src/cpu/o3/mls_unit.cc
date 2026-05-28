@@ -14,7 +14,6 @@
 #include "arch/riscv/insts/static_inst.hh"
 #include "arch/riscv/isa.hh"
 #include "arch/riscv/mmu.hh"
-#include "arch/riscv/pagetable.hh"
 #include "arch/riscv/regs/misc.hh"
 #include "arch/riscv/tlb.hh"
 #include "cpu/exec_context.hh"
@@ -38,8 +37,8 @@ mlsReplayCauseName(MlsReplayQueue::ReplayCause cause)
     switch (cause) {
       case MlsReplayQueue::ReplayCause::None:
         return "none";
-      case MlsReplayQueue::ReplayCause::TlbMissPending:
-        return "tlb-miss-pending";
+      case MlsReplayQueue::ReplayCause::TranslationResultPending:
+        return "translation-result-pending";
     }
 
     return "unknown";
@@ -676,49 +675,13 @@ MlsUnit::probeTlbState(StageState &state) const
 }
 
 bool
-MlsUnit::replayTlbReady(const MlsReplayQueue::ReplayState &state) const
-{
-    auto *mmu = dynamic_cast<RiscvISA::MMU *>(cpu->mmu);
-    panic_if(!mmu, "Matrix MLS replay requires RISC-V MMU");
-    auto *dtb = static_cast<RiscvISA::TLB *>(mmu->dtb);
-    auto *entry = dtb->lookup(
-        state.vaddr, state.asid, state.mode, true, false, RiscvISA::direct);
-    return entry != nullptr;
-}
-
-bool
 MlsUnit::ensureReplayReady(const MlsReplayQueue::ReplayState &state) const
 {
-    if (replayTlbReady(state)) {
+    if (state.translationComplete) {
         return true;
     }
 
-    if (!state.translationComplete) {
-        return false;
-    }
-
-    if (!FullSystem) {
-        auto *mmu = dynamic_cast<RiscvISA::MMU *>(cpu->mmu);
-        panic_if(!mmu, "Matrix MLS replay requires RISC-V MMU");
-        auto *dtb = static_cast<RiscvISA::TLB *>(mmu->dtb);
-
-        RiscvISA::TlbEntry entry;
-        entry.vaddr = state.vaddr;
-        entry.paddr = state.paddr >> RiscvISA::PGSHFT;
-        entry.logBytes = RiscvISA::PGSHFT;
-        entry.translateMode = RiscvISA::direct;
-        entry.asid = state.asid;
-        entry.pte = 0;
-        entry.pte.ppn = state.paddr >> RiscvISA::PGSHFT;
-        entry.pte.v = 1;
-        entry.pte.r = 1;
-        entry.pte.w = 1;
-        entry.pte.a = 1;
-        entry.pte.d = 1;
-        dtb->insert(state.vaddr, entry, false, RiscvISA::direct);
-    }
-
-    return replayTlbReady(state);
+    return false;
 }
 
 
@@ -918,6 +881,7 @@ MlsUnit::buildReplayState(const StageState &state) const
     replay_state.cause = state.replayCause;
     replay_state.translationComplete =
         state.fault == NoFault && state.request != nullptr;
+    replay_state.translationFault = state.fault != NoFault;
     if (state.request) {
         replay_state.requestFlags = state.request->getFlags();
     }
@@ -933,8 +897,8 @@ bool
 MlsUnit::replayReady(const MlsReplayQueue::ReplayState &state) const
 {
     switch (state.cause) {
-      case MlsReplayQueue::ReplayCause::TlbMissPending:
-        return replayTlbReady(state);
+      case MlsReplayQueue::ReplayCause::TranslationResultPending:
+        return ensureReplayReady(state);
       case MlsReplayQueue::ReplayCause::None:
         return false;
     }
@@ -994,17 +958,20 @@ MlsUnit::issue(const DynInstPtr &inst)
                 state.paddr,
                 static_cast<unsigned long long>(replayState.requestFlags));
     } else if (state.fault == NoFault && state.tlbMiss) {
-        state.replayCause = MlsReplayQueue::ReplayCause::TlbMissPending;
+        state.replayCause =
+            MlsReplayQueue::ReplayCause::TranslationResultPending;
         replayState.cause = state.replayCause;
         state.replayReady = ensureReplayReady(replayState);
         state.needReplay = true;
         DPRINTF(IEW,
                 "MlsUnit arm replay [tid:%i] [sn:%llu] cause=%s "
-                "vaddr=%#llx paddr=%#llx flags=%#llx ready=%d.\n",
+                "vaddr=%#llx paddr=%#llx flags=%#llx "
+                "translationComplete=%d ready=%d.\n",
                 inst->threadNumber, inst->seqNum,
                 mlsReplayCauseName(state.replayCause), state.vaddr,
                 state.paddr,
                 static_cast<unsigned long long>(replayState.requestFlags),
+                replayState.translationComplete,
                 state.replayReady);
     }
 

@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cassert>
+#include <memory>
+#include <utility>
 
 #include "base/logging.hh"
 #include "base/trace.hh"
@@ -43,6 +45,57 @@ mlsReplayCauseName(MlsReplayQueue::ReplayCause cause)
 
     return "unknown";
 }
+
+#if THE_ISA_IS_RISCV
+
+class MlsTranslation : public BaseMMU::Translation
+{
+  public:
+    MlsTranslation(
+        const DynInstPtr &inst_,
+        std::shared_ptr<MlsReplayQueue::TranslationContext> context_)
+        : inst(inst_), context(std::move(context_))
+    {
+        assert(context);
+    }
+
+    void
+    markDelayed() override
+    {
+        context->delayed = true;
+    }
+
+    bool
+    squashed() const override
+    {
+        return context->squashed || !inst || inst->isSquashed();
+    }
+
+    void
+    finish(const Fault &fault, const RequestPtr &req,
+           gem5::ThreadContext *tc, BaseMMU::Mode mode) override
+    {
+        context->request = req;
+        context->fault = fault;
+        context->finished = true;
+        if (inst && !inst->isSquashed()) {
+            inst->translatedTick = curTick();
+            inst->translationCompleted(true);
+            inst->getFault() = fault;
+            if (fault == NoFault && req->hasPaddr()) {
+                inst->physEffAddr = req->getPaddr();
+                inst->memReqFlags = req->getFlags();
+            }
+        }
+        delete this;
+    }
+
+  private:
+    DynInstPtr inst;
+    std::shared_ptr<MlsReplayQueue::TranslationContext> context;
+};
+
+#endif
 
 } // anonymous namespace
 
@@ -344,6 +397,10 @@ MlsReplayQueue::allocateOrUpdate(
     panic_if(tid >= entries.size(), "Invalid thread id %u for MlsReplayQueue", tid);
 
     if (auto *entry = findEntryByInst(inst)) {
+        if (entry->state.translationContext &&
+            entry->state.translationContext != state.translationContext) {
+            entry->state.translationContext->squashed = true;
+        }
         entry->scheduled = false;
         entry->ready = ready;
         entry->availableTick = ready ? curTick() + replaySelectLatency : 0;
@@ -440,6 +497,9 @@ MlsReplayQueue::scheduleNext(ThreadID tid, DynInstPtr &inst_out)
 void
 MlsReplayQueue::freeEntry(Entry &entry)
 {
+    if (entry.state.translationContext) {
+        entry.state.translationContext->squashed = true;
+    }
     if (entry.inst) {
         entry.inst->clearMatrixMlsReplaySlot();
     }
@@ -514,6 +574,7 @@ struct MlsUnit::StageState
     BaseMMU::Mode mode = BaseMMU::Read;
     unsigned accessSize = 0;
     RequestPtr request;
+    std::shared_ptr<MlsReplayQueue::TranslationContext> translationContext;
     Fault fault = NoFault;
     uint16_t asid = 0;
     bool tlbMiss = false;
@@ -679,7 +740,46 @@ bool
 MlsUnit::ensureReplayReady(
     const DynInstPtr &inst, MlsReplayQueue::ReplayState &state) const
 {
+    auto applyFinishedTranslation =
+        [&](const std::shared_ptr<MlsReplayQueue::TranslationContext> &ctx) {
+            if (!ctx || !ctx->finished) {
+                return false;
+            }
+
+            state.request = ctx->request ? ctx->request : state.request;
+            state.translationFault = ctx->fault != NoFault;
+            if (ctx->fault != NoFault) {
+                inst->translationCompleted(true);
+                inst->translatedTick = curTick();
+                inst->getFault() = ctx->fault;
+                return true;
+            }
+
+            if (state.request && state.request->hasPaddr()) {
+                state.paddr = state.request->getPaddr();
+                state.requestFlags = state.request->getFlags();
+                state.translationComplete = true;
+                inst->physEffAddr = state.paddr;
+                inst->memReqFlags = state.requestFlags;
+                inst->translationCompleted(true);
+                inst->translatedTick = curTick();
+                inst->getFault() = NoFault;
+                return true;
+            }
+
+            return false;
+        };
+
     if (state.translationComplete || state.translationFault) {
+        return true;
+    }
+
+    if (applyFinishedTranslation(state.translationContext)) {
+        return true;
+    }
+
+    if (inst->translationCompleted() && inst->getFault() != NoFault) {
+        state.translationFault = true;
         return true;
     }
 
@@ -717,14 +817,22 @@ MlsUnit::ensureReplayReady(
     inst->effSize = state.accessSize;
     inst->effAddrValid(true);
     inst->translationStarted(true);
+    inst->translationCompleted(false);
 
-    const Fault fault =
-        cpu->mmu->translateAtomic(state.request, inst->tcBase(), state.mode);
+    state.translationContext =
+        std::make_shared<MlsReplayQueue::TranslationContext>();
+    state.translationContext->request = state.request;
+    state.translationContext->started = true;
+    cpu->mmu->translateTiming(
+        state.request, inst->tcBase(),
+        new MlsTranslation(inst, state.translationContext), state.mode);
+    if (!applyFinishedTranslation(state.translationContext)) {
+        return false;
+    }
+
+    const Fault fault = inst->getFault();
     if (fault != NoFault) {
         state.translationFault = true;
-        inst->translationCompleted(true);
-        inst->translatedTick = curTick();
-        inst->getFault() = fault;
         return true;
     }
 
@@ -800,6 +908,7 @@ MlsUnit::restoreStage0FromReplay(
     state.asid = replay_state.asid;
     state.accessSize = replay_state.accessSize;
     state.request = replay_state.request;
+    state.translationContext = replay_state.translationContext;
     state.replayCause = replay_state.cause;
     deriveStage0Shape(inst, state);
 
@@ -829,9 +938,21 @@ MlsUnit::runStage1(const DynInstPtr &inst, StageState &state) const
             state.request->setReqInstSeqNum(inst->seqNum);
         }
 
-        state.fault = state.request->hasPaddr() ?
-            NoFault :
-            cpu->mmu->translateAtomic(state.request, inst->tcBase(), state.mode);
+        if (state.request->hasPaddr()) {
+            state.fault = NoFault;
+        } else {
+            inst->translationCompleted(false);
+            state.translationContext =
+                std::make_shared<MlsReplayQueue::TranslationContext>();
+            state.translationContext->request = state.request;
+            state.translationContext->started = true;
+            cpu->mmu->translateTiming(
+                state.request, inst->tcBase(),
+                new MlsTranslation(inst, state.translationContext),
+                state.mode);
+            state.fault =
+                inst->translationCompleted() ? inst->getFault() : NoFault;
+        }
 
         inst->translationCompleted(
             state.fault != NoFault || state.request->hasPaddr());
@@ -842,6 +963,9 @@ MlsUnit::runStage1(const DynInstPtr &inst, StageState &state) const
             state.paddr = state.request->getPaddr();
             inst->physEffAddr = state.paddr;
             inst->memReqFlags = state.request->getFlags();
+        } else if (state.fault != NoFault && state.translationContext) {
+            state.translationContext->finished = true;
+            state.translationContext->fault = state.fault;
         }
     }
 
@@ -945,6 +1069,7 @@ MlsUnit::buildReplayState(const StageState &state) const
     replay_state.mode = state.mode;
     replay_state.accessSize = state.accessSize;
     replay_state.request = state.request;
+    replay_state.translationContext = state.translationContext;
     replay_state.asid = state.asid;
     replay_state.cause = state.replayCause;
     replay_state.translationComplete =

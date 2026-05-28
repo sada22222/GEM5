@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <deque>
 #include <functional>
+#include <memory>
 #include <optional>
 #include <vector>
 
@@ -71,6 +72,16 @@ class MlsReplayQueue
         TranslationResultPending,
     };
 
+    struct TranslationContext
+    {
+        RequestPtr request;
+        Fault fault = NoFault;
+        bool started = false;
+        bool finished = false;
+        bool delayed = false;
+        bool squashed = false;
+    };
+
     struct ReplayState
     {
         ReplayCause cause = ReplayCause::None;
@@ -82,6 +93,7 @@ class MlsReplayQueue
         BaseMMU::Mode mode = BaseMMU::Read;
         unsigned accessSize = 0;
         RequestPtr request;
+        std::shared_ptr<TranslationContext> translationContext;
         Request::Flags requestFlags = {};
         uint16_t asid = 0;
         bool translationComplete = false;

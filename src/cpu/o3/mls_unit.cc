@@ -926,9 +926,11 @@ MlsUnit::issue(const DynInstPtr &inst)
 
     StageState state;
     state.fault = inst->getFault();
+    bool retryingReplay = false;
     if (replayQueue) {
         if (const auto *replay_state = replayQueue->getState(inst)) {
             restoreStage0FromReplay(inst, *replay_state, state);
+            retryingReplay = true;
         } else {
             captureStage0(inst, state);
         }
@@ -947,7 +949,8 @@ MlsUnit::issue(const DynInstPtr &inst)
         translationSucceeded &&
         (replayState.requestFlags & Request::PHYSICAL);
 
-    if (state.fault == NoFault && state.tlbMiss && translationSucceeded) {
+    if (!retryingReplay && state.fault == NoFault && state.tlbMiss &&
+        translationSucceeded) {
         const char *path_name =
             directPhysTranslation ? "physical translation" :
                                     "completed translation";

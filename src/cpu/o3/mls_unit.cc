@@ -52,10 +52,12 @@ class MlsTranslation : public BaseMMU::Translation
 {
   public:
     MlsTranslation(
+        CPU *cpu_,
         const DynInstPtr &inst_,
         std::shared_ptr<MlsReplayQueue::TranslationContext> context_)
-        : inst(inst_), context(std::move(context_))
+        : cpu(cpu_), inst(inst_), context(std::move(context_))
     {
+        assert(cpu);
         assert(context);
     }
 
@@ -86,11 +88,14 @@ class MlsTranslation : public BaseMMU::Translation
                 inst->physEffAddr = req->getPaddr();
                 inst->memReqFlags = req->getFlags();
             }
+            cpu->wakeCPU();
+            cpu->activityThisCycle();
         }
         delete this;
     }
 
   private:
+    CPU *cpu;
     DynInstPtr inst;
     std::shared_ptr<MlsReplayQueue::TranslationContext> context;
 };
@@ -825,7 +830,7 @@ MlsUnit::ensureReplayReady(
     state.translationContext->started = true;
     cpu->mmu->translateTiming(
         state.request, inst->tcBase(),
-        new MlsTranslation(inst, state.translationContext), state.mode);
+        new MlsTranslation(cpu, inst, state.translationContext), state.mode);
     if (!applyFinishedTranslation(state.translationContext)) {
         return false;
     }
@@ -948,7 +953,7 @@ MlsUnit::runStage1(const DynInstPtr &inst, StageState &state) const
             state.translationContext->started = true;
             cpu->mmu->translateTiming(
                 state.request, inst->tcBase(),
-                new MlsTranslation(inst, state.translationContext),
+                new MlsTranslation(cpu, inst, state.translationContext),
                 state.mode);
             state.fault =
                 inst->translationCompleted() ? inst->getFault() : NoFault;

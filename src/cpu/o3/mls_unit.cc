@@ -29,6 +29,24 @@ namespace gem5
 namespace o3
 {
 
+namespace
+{
+
+const char *
+mlsReplayCauseName(MlsReplayQueue::ReplayCause cause)
+{
+    switch (cause) {
+      case MlsReplayQueue::ReplayCause::None:
+        return "none";
+      case MlsReplayQueue::ReplayCause::TlbMissPending:
+        return "tlb-miss-pending";
+    }
+
+    return "unknown";
+}
+
+} // anonymous namespace
+
 MlsVirtualQueue::MlsVirtualQueue(unsigned num_threads, unsigned capacity)
     : queueCapacity(capacity),
       queues(num_threads),
@@ -320,6 +338,9 @@ MlsReplayQueue::allocateOrUpdate(
     const DynInstPtr &inst, const ReplayState &state, bool ready)
 {
     panic_if(!inst, "Attempted to allocate null matrix replay entry");
+    panic_if(state.cause == ReplayCause::None,
+             "Matrix replay entry missing cause [tid:%i] [sn:%llu]",
+             inst->threadNumber, inst->seqNum);
     const ThreadID tid = inst->threadNumber;
     panic_if(tid >= entries.size(), "Invalid thread id %u for MlsReplayQueue", tid);
 
@@ -330,9 +351,10 @@ MlsReplayQueue::allocateOrUpdate(
         entry->state = state;
         DPRINTF(IEW,
                 "MlsReplayQueue retry-arm [tid:%i] [sn:%llu] slot=%u "
-                "robOrder=%llu ready=%d vaddr=%#llx.\n",
+                "robOrder=%llu ready=%d cause=%s vaddr=%#llx flags=%#llx.\n",
                 tid, inst->seqNum, entry->slot, entry->robSeqNum,
-                ready, state.vaddr);
+                ready, mlsReplayCauseName(state.cause), state.vaddr,
+                static_cast<unsigned long long>(state.requestFlags));
         return true;
     }
 
@@ -356,9 +378,12 @@ MlsReplayQueue::allocateOrUpdate(
 
     DPRINTF(IEW,
             "MlsReplayQueue alloc [tid:%i] [sn:%llu] slot=%u robOrder=%llu "
-            "ready=%d vaddr=%#llx stride=%#llx tile0=%#llx tile1=%#llx.\n",
+            "ready=%d cause=%s vaddr=%#llx stride=%#llx tile0=%#llx "
+            "tile1=%#llx flags=%#llx.\n",
             tid, inst->seqNum, entry.slot, entry.robSeqNum,
-            ready, state.vaddr, state.stride, state.tile0, state.tile1);
+            ready, mlsReplayCauseName(state.cause), state.vaddr,
+            state.stride, state.tile0, state.tile1,
+            static_cast<unsigned long long>(state.requestFlags));
     return true;
 }
 
@@ -405,8 +430,10 @@ MlsReplayQueue::scheduleNext(ThreadID tid, DynInstPtr &inst_out)
     inst_out = selected->inst;
 
     DPRINTF(IEW,
-            "MlsReplayQueue schedule [tid:%i] [sn:%llu] slot=%u robOrder=%llu.\n",
-            tid, selected->robSeqNum, selected->slot, selected->robSeqNum);
+            "MlsReplayQueue schedule [tid:%i] [sn:%llu] slot=%u "
+            "robOrder=%llu cause=%s.\n",
+            tid, selected->robSeqNum, selected->slot, selected->robSeqNum,
+            mlsReplayCauseName(selected->state.cause));
     return true;
 }
 
@@ -492,6 +519,8 @@ struct MlsUnit::StageState
     bool tlbMiss = false;
     bool replayReady = false;
     bool needReplay = false;
+    MlsReplayQueue::ReplayCause replayCause =
+        MlsReplayQueue::ReplayCause::None;
     ExecContext::MatrixExecPayload payload = {};
 };
 
@@ -664,6 +693,10 @@ MlsUnit::ensureReplayReady(const MlsReplayQueue::ReplayState &state) const
         return true;
     }
 
+    if (!state.translationComplete) {
+        return false;
+    }
+
     if (!FullSystem) {
         auto *mmu = dynamic_cast<RiscvISA::MMU *>(cpu->mmu);
         panic_if(!mmu, "Matrix MLS replay requires RISC-V MMU");
@@ -742,13 +775,15 @@ MlsUnit::restoreStage0FromReplay(
     state.tile1 = replay_state.tile1;
     state.mode = replay_state.mode;
     state.asid = replay_state.asid;
+    state.replayCause = replay_state.cause;
     deriveStage0Shape(inst, state);
 
     DPRINTF(IEW,
             "MlsUnit S0 replay-restore [tid:%i] [sn:%llu] vaddr=%#llx "
-            "stride=%#llx tile0=%#llx tile1=%#llx.\n",
+            "stride=%#llx tile0=%#llx tile1=%#llx cause=%s.\n",
             inst->threadNumber, inst->seqNum, state.vaddr,
-            state.stride, state.tile0, state.tile1);
+            state.stride, state.tile0, state.tile1,
+            mlsReplayCauseName(state.replayCause));
 }
 
 void
@@ -806,9 +841,10 @@ MlsUnit::runStage3(const DynInstPtr &inst, StageState &state) const
 {
     if (state.needReplay) {
         DPRINTF(IEW,
-                "MlsUnit S3 replay request [tid:%i] [sn:%llu] cause=tlb-miss "
+                "MlsUnit S3 replay request [tid:%i] [sn:%llu] cause=%s "
                 "vaddr=%#llx stride=%#llx tile0=%#llx tile1=%#llx.\n",
-                inst->threadNumber, inst->seqNum, state.vaddr,
+                inst->threadNumber, inst->seqNum,
+                mlsReplayCauseName(state.replayCause), state.vaddr,
                 state.stride, state.tile0, state.tile1);
         return;
     }
@@ -879,6 +915,12 @@ MlsUnit::buildReplayState(const StageState &state) const
     replay_state.tile1 = state.tile1;
     replay_state.mode = state.mode;
     replay_state.asid = state.asid;
+    replay_state.cause = state.replayCause;
+    replay_state.translationComplete =
+        state.fault == NoFault && state.request != nullptr;
+    if (state.request) {
+        replay_state.requestFlags = state.request->getFlags();
+    }
     return replay_state;
 }
 
@@ -890,7 +932,14 @@ MlsUnit::MlsUnit(CPU *cpu_) : cpu(cpu_)
 bool
 MlsUnit::replayReady(const MlsReplayQueue::ReplayState &state) const
 {
-    return replayTlbReady(state);
+    switch (state.cause) {
+      case MlsReplayQueue::ReplayCause::TlbMissPending:
+        return replayTlbReady(state);
+      case MlsReplayQueue::ReplayCause::None:
+        return false;
+    }
+
+    return false;
 }
 
 MlsUnit::IssueResult
@@ -928,20 +977,35 @@ MlsUnit::issue(const DynInstPtr &inst)
     runStage1(inst, state);
     auto replayState = buildReplayState(state);
 
+    const bool translationSucceeded =
+        state.fault == NoFault && replayState.translationComplete;
     const bool directPhysTranslation =
-        state.fault == NoFault && state.request &&
-        (state.request->getFlags() & Request::PHYSICAL);
+        translationSucceeded &&
+        (replayState.requestFlags & Request::PHYSICAL);
 
-    if (state.fault == NoFault && state.tlbMiss && !directPhysTranslation) {
+    if (state.fault == NoFault && state.tlbMiss && translationSucceeded) {
+        const char *path_name =
+            directPhysTranslation ? "physical translation" :
+                                    "completed translation";
+        DPRINTF(IEW,
+                "MlsUnit bypass replay on %s [tid:%i] [sn:%llu] "
+                "vaddr=%#llx paddr=%#llx flags=%#llx.\n",
+                path_name, inst->threadNumber, inst->seqNum, state.vaddr,
+                state.paddr,
+                static_cast<unsigned long long>(replayState.requestFlags));
+    } else if (state.fault == NoFault && state.tlbMiss) {
+        state.replayCause = MlsReplayQueue::ReplayCause::TlbMissPending;
+        replayState.cause = state.replayCause;
         state.replayReady = ensureReplayReady(replayState);
         state.needReplay = true;
-    } else if (state.fault == NoFault && state.tlbMiss &&
-               directPhysTranslation) {
         DPRINTF(IEW,
-                "MlsUnit bypass replay on physical translation [tid:%i] "
-                "[sn:%llu] vaddr=%#llx paddr=%#llx flags=%#x.\n",
-                inst->threadNumber, inst->seqNum, state.vaddr, state.paddr,
-                state.request->getFlags());
+                "MlsUnit arm replay [tid:%i] [sn:%llu] cause=%s "
+                "vaddr=%#llx paddr=%#llx flags=%#llx ready=%d.\n",
+                inst->threadNumber, inst->seqNum,
+                mlsReplayCauseName(state.replayCause), state.vaddr,
+                state.paddr,
+                static_cast<unsigned long long>(replayState.requestFlags),
+                state.replayReady);
     }
 
     if (state.fault == NoFault && !state.needReplay) {

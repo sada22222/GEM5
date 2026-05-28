@@ -11,6 +11,7 @@
 #include "base/types.hh"
 #include "cpu/inst_seq.hh"
 #include "cpu/o3/dyn_inst_ptr.hh"
+#include "mem/request.hh"
 #include "sim/cur_tick.hh"
 #include "sim/faults.hh"
 
@@ -64,15 +65,24 @@ class MlsVirtualQueue
 class MlsReplayQueue
 {
   public:
+    enum class ReplayCause : uint8_t
+    {
+        None = 0,
+        TlbMissPending,
+    };
+
     struct ReplayState
     {
+        ReplayCause cause = ReplayCause::None;
         Addr vaddr = 0;
         Addr paddr = 0;
         RegVal stride = 0;
         RegVal tile0 = 0;
         RegVal tile1 = 0;
         BaseMMU::Mode mode = BaseMMU::Read;
+        Request::Flags requestFlags = {};
         uint16_t asid = 0;
+        bool translationComplete = false;
     };
 
     struct Entry

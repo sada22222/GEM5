@@ -64,7 +64,6 @@ class MlsTranslation : public BaseMMU::Translation
     void
     markDelayed() override
     {
-        context->delayed = true;
     }
 
     bool
@@ -827,7 +826,6 @@ MlsUnit::ensureReplayReady(
     state.translationContext =
         std::make_shared<MlsReplayQueue::TranslationContext>();
     state.translationContext->request = state.request;
-    state.translationContext->started = true;
     cpu->mmu->translateTiming(
         state.request, inst->tcBase(),
         new MlsTranslation(cpu, inst, state.translationContext), state.mode);
@@ -911,7 +909,6 @@ MlsUnit::restoreStage0FromReplay(
     state.tile1 = replay_state.tile1;
     state.mode = replay_state.mode;
     state.asid = replay_state.asid;
-    state.accessSize = replay_state.accessSize;
     state.request = replay_state.request;
     state.translationContext = replay_state.translationContext;
     state.replayCause = replay_state.cause;
@@ -943,14 +940,11 @@ MlsUnit::runStage1(const DynInstPtr &inst, StageState &state) const
             state.request->setReqInstSeqNum(inst->seqNum);
         }
 
-        if (state.request->hasPaddr()) {
-            state.fault = NoFault;
-        } else {
+        if (!state.request->hasPaddr()) {
             inst->translationCompleted(false);
             state.translationContext =
                 std::make_shared<MlsReplayQueue::TranslationContext>();
             state.translationContext->request = state.request;
-            state.translationContext->started = true;
             cpu->mmu->translateTiming(
                 state.request, inst->tcBase(),
                 new MlsTranslation(cpu, inst, state.translationContext),

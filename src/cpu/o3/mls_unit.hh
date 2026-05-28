@@ -76,9 +76,7 @@ class MlsReplayQueue
     {
         RequestPtr request;
         Fault fault = NoFault;
-        bool started = false;
         bool finished = false;
-        bool delayed = false;
         bool squashed = false;
     };
 

@@ -458,9 +458,11 @@ LSQUnit::init(CPU *cpu_ptr, IEW *iew_ptr, const BaseO3CPUParams &params,
     iewStage = iew_ptr;
 
     lsq = lsq_ptr;
-    mlsUnit.emplace(cpu_ptr);
-    mlsUnit->setReplayQueue(lsq->matrixReplayQueue());
-    mlsUnit->setVirtualQueue(lsq->matrixVirtualQueue());
+    if (lsq->matrixMlsEnabled()) {
+        mlsUnit.emplace(cpu_ptr);
+        mlsUnit->setReplayQueue(lsq->matrixReplayQueue());
+        mlsUnit->setVirtualQueue(lsq->matrixVirtualQueue());
+    }
 
     cpu->addStatGroup(csprintf("lsq%i", lsqID).c_str(), &stats);
 
@@ -1162,6 +1164,9 @@ LSQUnit::issueToStorePipe(const DynInstPtr &inst)
 MlsUnit::IssueResult
 LSQUnit::issueMatrixMem(const DynInstPtr &inst)
 {
+    panic_if(!lsq->matrixMlsEnabled(),
+             "Matrix MLS execution is disabled [sn:%llu]",
+             inst ? inst->seqNum : 0);
     panic_if(!mlsUnit.has_value(),
              "Matrix MLS execution helper is not initialized [sn:%llu]",
              inst ? inst->seqNum : 0);
@@ -1172,6 +1177,8 @@ bool
 LSQUnit::matrixReplayReady(
     const DynInstPtr &inst, MlsReplayQueue::ReplayState &state) const
 {
+    panic_if(!lsq->matrixMlsEnabled(),
+             "Matrix MLS replay is disabled");
     panic_if(!mlsUnit.has_value(),
              "Matrix MLS execution helper is not initialized for replay check");
     return mlsUnit->replayReady(inst, state);

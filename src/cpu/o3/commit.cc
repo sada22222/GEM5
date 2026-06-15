@@ -1611,6 +1611,7 @@ Commit::commitInsts()
 
     bool firedMatrixAmuProxy = false;
     for (auto it = activeThreads->begin();
+         cpu->isMatrixBackendEnabled() &&
          it != activeThreads->end() && !firedMatrixAmuProxy; ++it) {
         ThreadID tid = *it;
         ROB::MatrixAmuEntry entry;
@@ -2007,7 +2008,8 @@ Commit::moveInstsToBuffer()
             rob->getMaxEntries(i) - rob->getThreadEntries(i) < fixedbuffer[i].size();
         unsigned amuEntryDemand = 0;
         for (const auto &inst : fixedbuffer[i]) {
-            if (inst && !inst->isSquashed()) {
+            if (inst && !inst->isSquashed() &&
+                inst->isMatrixInst() && inst->matrixNeedAmuCtrl()) {
                 ++amuEntryDemand;
             }
         }

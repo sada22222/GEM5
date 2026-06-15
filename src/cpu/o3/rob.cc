@@ -299,7 +299,8 @@ ROB::resetState()
 bool
 ROB::shouldTrackMatrixAmu(const DynInstPtr &inst) const
 {
-    return static_cast<bool>(inst);
+    return cpu->isMatrixBackendEnabled() && inst && inst->isMatrixInst() &&
+           inst->matrixNeedAmuCtrl();
 }
 
 void
@@ -310,10 +311,8 @@ ROB::insertMatrixAmuEntry(const DynInstPtr &inst)
     }
 
     matrixAmuBuffers[inst->threadNumber].allocate(
-        inst->threadNumber, inst->seqNum,
-        inst->isMatrixInst() && inst->matrixNeedAmuCtrl(),
-        inst->isMatrixInst() ? inst->matrixInstClassName() : "non-matrix",
-        inst->isMatrixInst() ? inst->matrixRouteName() : "rob-shadow");
+        inst->threadNumber, inst->seqNum, true,
+        inst->matrixInstClassName(), inst->matrixRouteName());
 }
 
 void
@@ -349,24 +348,36 @@ ROB::noteMatrixAmuCommit(const DynInstPtr &inst)
 bool
 ROB::peekReadyMatrixAmuEntry(ThreadID tid, MatrixAmuEntry &entry_out)
 {
+    if (!cpu->isMatrixBackendEnabled()) {
+        return false;
+    }
     return matrixAmuBuffers[tid].peekReady(tid, entry_out);
 }
 
 bool
 ROB::popReadyMatrixAmuEntry(ThreadID tid, MatrixAmuEntry &entry_out)
 {
+    if (!cpu->isMatrixBackendEnabled()) {
+        return false;
+    }
     return matrixAmuBuffers[tid].popReady(tid, entry_out);
 }
 
 unsigned
 ROB::numFreeMatrixAmuEntries(ThreadID tid)
 {
+    if (!cpu->isMatrixBackendEnabled()) {
+        return matrixAmuBufferEntries;
+    }
     return matrixAmuBuffers[tid].numFreeEntries(tid);
 }
 
 void
 ROB::squashMatrixAmuEntry(ThreadID tid, InstSeqNum seq_num)
 {
+    if (!cpu->isMatrixBackendEnabled()) {
+        return;
+    }
     matrixAmuBuffers[tid].squash(tid, seq_num);
 }
 

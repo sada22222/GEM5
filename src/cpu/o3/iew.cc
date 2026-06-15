@@ -112,6 +112,15 @@ usesScalarLsqPath(const DynInstPtr &inst)
     return inst && inst->isMemRef() && !isMatrixMemInst(inst);
 }
 
+void
+panicIfMatrixMlsDisabled(const DynInstPtr &inst, const LSQ &ldst_queue)
+{
+    panic_if(isMatrixMemInst(inst) && !ldst_queue.matrixMlsEnabled(),
+             "Matrix memory instruction [sn:%llu] reached IEW while "
+             "enableMatrixMlsQueue=false",
+             inst ? inst->seqNum : 0);
+}
+
 } // namespace
 
 IEW::IEW(CPU *_cpu, const BaseO3CPUParams &params)
@@ -1086,6 +1095,7 @@ IEW::dispatchInstFromRename(ThreadID tid)
             break;
         }
 
+        panicIfMatrixMlsDisabled(inst, ldstQueue);
         if (isMatrixMemInst(inst) && !ldstQueue.canAllocateMatrixMem(tid)) {
             DPRINTF(IEW, "[tid:%i] Dispatch: MLSQ has become full.\n", tid);
 
@@ -1137,6 +1147,7 @@ IEW::dispatchInstFromRename(ThreadID tid)
             scheduler->addProducer(inst);
         }
 
+        panicIfMatrixMlsDisabled(inst, ldstQueue);
         if (isMatrixMemInst(inst)) {
             DPRINTF(IEW,
                     "[tid:%i] Dispatch: Matrix memory instruction "
@@ -1294,6 +1305,7 @@ IEW::classifyInstToDispQue(ThreadID tid)
                 break;
             }
 
+            panicIfMatrixMlsDisabled(inst, ldstQueue);
             if (isMatrixMemInst(inst) &&
                 !ldstQueue.hasMatrixMemEntry(inst) &&
                 !ldstQueue.canAllocateMatrixMem(tid)) {
@@ -1331,6 +1343,7 @@ IEW::classifyInstToDispQue(ThreadID tid)
             }
             ++iewStats.dispatchedInsts;
 
+            panicIfMatrixMlsDisabled(inst, ldstQueue);
             if (isMatrixMemInst(inst) && !ldstQueue.hasMatrixMemEntry(inst)) {
                 panic_if(!ldstQueue.allocateMatrixMemEntry(inst),
                          "[tid:%i] MLSQ alloc failed after canAccept [sn:%llu]",
@@ -1424,6 +1437,7 @@ IEW::dispatchInstFromDispQue()
                 break;
             }
 
+            panicIfMatrixMlsDisabled(inst, ldstQueue);
             if (isMatrixMemInst(inst) &&
                 !ldstQueue.canAllocateMatrixMem(tid) &&
                 !ldstQueue.hasMatrixMemEntry(inst)) {
@@ -1450,6 +1464,7 @@ IEW::dispatchInstFromDispQue()
 
             bool add_to_iq = false;
             // Otherwise issue the instruction just fine.
+            panicIfMatrixMlsDisabled(inst, ldstQueue);
             if (isMatrixMemInst(inst)) {
                 DPRINTF(IEW,
                         "[tid:%i] Dispatch: Matrix memory instruction "
@@ -1753,6 +1768,7 @@ IEW::executeInsts()
         // Execute instruction.
         // Note that if the instruction faults, it will be handled
         // at the commit stage.
+        panicIfMatrixMlsDisabled(inst, ldstQueue);
         if (isMatrixMemInst(inst)) {
             DPRINTF(IEW,
                     "Execute: Routing matrix memory reference to "

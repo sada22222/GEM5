@@ -111,6 +111,18 @@ requestKindName(matrix::CuteRequestKind kind)
     return "unknown";
 }
 
+std::vector<bool>
+byteEnableFromMask(uint64_t byte_mask, uint32_t packet_size)
+{
+    std::vector<bool> byte_enable(packet_size, byte_mask == 0);
+    for (uint32_t byte = 0; byte < packet_size && byte < 64; ++byte) {
+        if ((byte_mask & (uint64_t(1) << byte)) != 0) {
+            byte_enable[byte] = true;
+        }
+    }
+    return byte_enable;
+}
+
 } // anonymous namespace
 #endif
 
@@ -120,8 +132,8 @@ CPU::MatrixMemPort::MatrixMemPort(const std::string &name, CPU *cpu_)
 {
 }
 
-PacketPtr
-CPU::MatrixMemPort::buildTimingPacket(const Request &request)
+void
+CPU::MatrixMemPort::sendFunctionalStore(const Request &request)
 {
     auto req = std::make_shared<gem5::Request>(
         request.paddr, request.packetSize, gem5::Request::PHYSICAL,
@@ -130,31 +142,33 @@ CPU::MatrixMemPort::buildTimingPacket(const Request &request)
     if (request.contextId != InvalidContextID) {
         req->setContext(request.contextId);
     }
+    req->setByteEnable(
+        byteEnableFromMask(request.byteMask, request.packetSize));
 
-    if (request.isStore) {
-        if (!request.byteEnable.empty()) {
-            req->setByteEnable(request.byteEnable);
-        } else {
-            req->setByteEnable(
-                std::vector<bool>(request.packetSize, true));
-        }
+    Packet pkt(req, MemCmd::WriteReq);
+    pkt.dataStaticConst(request.data.data());
+    sendFunctional(&pkt);
+}
+
+PacketPtr
+CPU::MatrixMemPort::buildTimingPacket(const Request &request)
+{
+    assert(!request.isStore);
+
+    auto req = std::make_shared<gem5::Request>(
+        request.paddr, request.packetSize, gem5::Request::PHYSICAL,
+        cpu->dataRequestorId());
+    req->taskId(cpu->taskId());
+    if (request.contextId != InvalidContextID) {
+        req->setContext(request.contextId);
     }
 
-    auto *pkt = request.isStore ?
-        Packet::createWrite(req) : Packet::createRead(req);
+    auto *pkt = Packet::createRead(req);
     auto *data = new uint8_t[request.packetSize];
-    if (request.isStore) {
-        std::memset(data, 0, request.packetSize);
-        const auto copy_size = std::min<size_t>(
-            request.dataSize == 0 ? request.packetSize : request.dataSize,
-            request.data.size());
-        std::memcpy(data, request.data.data(), copy_size);
-    } else {
-        std::memset(data, 0, request.packetSize);
-    }
+    std::memset(data, 0, request.packetSize);
     pkt->dataDynamic(data);
     pkt->senderState = new SenderState(
-        request.sourceId, request.isStore, request.byteMask);
+        request.sourceId, false, request.byteMask);
     return pkt;
 }
 
@@ -173,7 +187,7 @@ CPU::MatrixMemPort::buildStoreInvalidatePacket(const Request &request)
 
     auto *pkt = Packet::createWrite(req);
     pkt->senderState = new SenderState(
-        request.sourceId, true, request.byteMask, true, request);
+        request.sourceId, true, request.byteMask, true);
     return pkt;
 }
 
@@ -218,7 +232,6 @@ CPU::MatrixMemPort::recvTimingResp(PacketPtr pkt)
 
     const uint32_t source_id = state->sourceId;
     const bool store_invalidate_done = state->awaitingStoreInvalidate;
-    const auto store_request = state->storeRequest;
     const bool has_data = pkt->hasData() && pkt->getSize() != 0;
     const uint32_t data_size = has_data ? pkt->getSize() : 0;
     std::vector<uint8_t> data;
@@ -232,12 +245,15 @@ CPU::MatrixMemPort::recvTimingResp(PacketPtr pkt)
     delete pkt;
 
     if (store_invalidate_done) {
-        auto *write_pkt = buildTimingPacket(store_request);
-        sendOrBlock(write_pkt);
+        const bool completed =
+            cpu->matrixBackend &&
+            cpu->matrixBackend->completeTimingMemoryResponse(source_id);
+        panic_if(!completed,
+                 "Matrix memory response for unknown source %u", source_id);
         cpu->activityRec.activity();
         cpu->scheduleTickEvent(Cycles(0));
         DPRINTF(MatrixCuteTrace,
-                "matrix_mem_port_store_invalidate_resp source=%u.\n",
+                "matrix_mem_port_store_clean_ack source=%u.\n",
                 source_id);
         return true;
     }

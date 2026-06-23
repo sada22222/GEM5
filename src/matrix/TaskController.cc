@@ -74,7 +74,6 @@ void
 DetailedCuteBackend::submit(const CuteRequest &req)
 {
     assert(canAccept(req));
-    ++counters.fifoEnqueue;
     DPRINTF(MatrixCuteTrace,
             "fifo_enq [sn:%llu] kind=%u depth=%llu/%llu.\n",
             req.seq,
@@ -82,39 +81,6 @@ DetailedCuteBackend::submit(const CuteRequest &req)
             static_cast<unsigned long long>(fifo.size() + 1),
             static_cast<unsigned long long>(fifo.depth()));
     fifo.enqueue(decodeCuteRequest(req));
-}
-
-bool
-DetailedCuteBackend::canDownstreamAccept(const DecodedFifoEntry &entry) const
-{
-    if (entry.isLoad) {
-        if (entry.request.lsu.isAcc) {
-            return cmlReady();
-        }
-        return entry.request.lsu.isB ? bmlReady() : amlReady();
-    }
-
-    if (entry.isStore) {
-        return cmlReady();
-    }
-
-    if (entry.isMma) {
-        return computePathReady(entry);
-    }
-
-    if (entry.isRelease) {
-        return !releaseTask.has_value();
-    }
-
-    if (entry.isZeroAcc) {
-        return cmlReady();
-    }
-
-    if (entry.isZeroTr) {
-        return amlReady();
-    }
-
-    return false;
 }
 
 DetailedCuteBackend::MicroTaskKind
@@ -147,27 +113,6 @@ DetailedCuteBackend::microTaskKindForEntry(const DecodedFifoEntry &entry) const
     return MicroTaskKind::Release;
 }
 
-bool
-DetailedCuteBackend::microTaskAvailable(MicroTaskKind kind) const
-{
-    switch (kind) {
-      case MicroTaskKind::AML:
-        return !amlTask.has_value();
-      case MicroTaskKind::BML:
-        return !bmlTask.has_value();
-      case MicroTaskKind::CML:
-        return !cmlTask.has_value();
-      case MicroTaskKind::Release:
-        return !releaseTask.has_value();
-      case MicroTaskKind::Compute:
-        return true;
-      case MicroTaskKind::Count:
-        break;
-    }
-
-    return true;
-}
-
 size_t
 DetailedCuteBackend::activeTaskCount() const
 {
@@ -181,45 +126,32 @@ DetailedCuteBackend::activeTaskCount() const
 }
 
 bool
-DetailedCuteBackend::loadPathReady(const DecodedFifoEntry &entry) const
+DetailedCuteBackend::issuePathReady(const DecodedFifoEntry &entry) const
 {
-    return entry.isLoad &&
-           microTaskAvailable(microTaskKindForEntry(entry)) &&
-           canDownstreamAccept(entry);
-}
+    if (entry.isMma) {
+        return computeUnitAvailable(ComputeUnitKind::ADC) &&
+               computeUnitAvailable(ComputeUnitKind::BDC) &&
+               computeUnitAvailable(ComputeUnitKind::CDC);
+    }
+    if (entry.isRelease) {
+        return releaseReady() && !releaseTask.has_value();
+    }
 
-bool
-DetailedCuteBackend::storePathReady(const DecodedFifoEntry &entry) const
-{
-    return entry.isStore &&
-           microTaskAvailable(MicroTaskKind::CML) &&
-           canDownstreamAccept(entry);
-}
-
-bool
-DetailedCuteBackend::computePathReady(const DecodedFifoEntry &entry) const
-{
-    return entry.isMma &&
-           microTaskAvailable(MicroTaskKind::Compute) &&
-           computeUnitAvailable(ComputeUnitKind::ADC) &&
-           computeUnitAvailable(ComputeUnitKind::BDC) &&
-           computeUnitAvailable(ComputeUnitKind::CDC);
-}
-
-bool
-DetailedCuteBackend::arithPathReady(const DecodedFifoEntry &entry) const
-{
-    return (entry.isZeroAcc || entry.isZeroTr) &&
-           microTaskAvailable(microTaskKindForEntry(entry)) &&
-           canDownstreamAccept(entry);
-}
-
-bool
-DetailedCuteBackend::releasePathReady(const DecodedFifoEntry &entry) const
-{
-    return entry.isRelease && releaseReady() &&
-           microTaskAvailable(MicroTaskKind::Release) &&
-           canDownstreamAccept(entry);
+    switch (microTaskKindForEntry(entry)) {
+      case MicroTaskKind::AML:
+        return !amlTask.has_value();
+      case MicroTaskKind::BML:
+        return !bmlTask.has_value();
+      case MicroTaskKind::CML:
+        return !cmlTask.has_value();
+      case MicroTaskKind::Compute:
+        return true;
+      case MicroTaskKind::Release:
+        return !releaseTask.has_value();
+      case MicroTaskKind::Count:
+        return false;
+    }
+    return false;
 }
 
 bool
@@ -231,34 +163,7 @@ DetailedCuteBackend::headReady(const DecodedFifoEntry &entry,
         return false;
     }
 
-    if (entry.isLoad) {
-        return loadPathReady(entry);
-    } else if (entry.isStore) {
-        return storePathReady(entry);
-    } else if (entry.isMma) {
-        return computePathReady(entry);
-    } else if (entry.isZeroAcc || entry.isZeroTr) {
-        return arithPathReady(entry);
-    } else if (entry.isRelease) {
-        return releasePathReady(entry);
-    }
-
-    return false;
-}
-
-void
-DetailedCuteBackend::recordScoreboardBlock(
-    DetailedCuteScoreboard::BlockReason reason)
-{
-    ++counters.scoreboardBlock;
-    ++counters.scoreboardBlockReasons[static_cast<size_t>(reason)];
-}
-
-void
-DetailedCuteBackend::recordFifoBlock(FifoBlockReason reason)
-{
-    ++counters.fifoBlock;
-    ++counters.fifoBlockReasons[static_cast<size_t>(reason)];
+    return issuePathReady(entry);
 }
 
 void
@@ -268,14 +173,6 @@ DetailedCuteBackend::issueHead(const DecodedFifoEntry &entry)
     if (entry.isStore) {
         ++pendingStoreCount;
     }
-
-    if (entry.writeValid[0]) {
-        // ownership metadata no longer lives in MatrixRegFile
-    }
-
-    const auto kind = microTaskKindForEntry(entry);
-    ++counters.microtaskIssue;
-    ++counters.microtaskIssuesByKind[static_cast<size_t>(kind)];
 
     dispatchTask(entry);
 }
@@ -319,7 +216,7 @@ DetailedCuteBackend::dispatchTask(const DecodedFifoEntry &entry)
 }
 
 bool
-DetailedCuteBackend::computeUnitBusyForTest(ComputeUnitKind kind) const
+DetailedCuteBackend::computeUnitBusy(ComputeUnitKind kind) const
 {
     if (kind == ComputeUnitKind::None || kind == ComputeUnitKind::Count) {
         return false;
@@ -327,15 +224,18 @@ DetailedCuteBackend::computeUnitBusyForTest(ComputeUnitKind kind) const
 
     for (const auto &task : computeTasks) {
         if (kind == ComputeUnitKind::ADC &&
-            task.adcReadIssued && !task.adcReadComplete) {
+            task.readIssued[ComputeReadAIdx] &&
+            !task.readComplete[ComputeReadAIdx]) {
             return true;
         }
         if (kind == ComputeUnitKind::BDC &&
-            task.bdcReadIssued && !task.bdcReadComplete) {
+            task.readIssued[ComputeReadBIdx] &&
+            !task.readComplete[ComputeReadBIdx]) {
             return true;
         }
         if (kind == ComputeUnitKind::CDC &&
-            ((task.cdcReadIssued && !task.cdcReadComplete) ||
+            ((task.readIssued[ComputeReadCIdx] &&
+              !task.readComplete[ComputeReadCIdx]) ||
              task.activeUnit == ComputeUnitKind::CDC)) {
             return true;
         }
@@ -346,29 +246,10 @@ DetailedCuteBackend::computeUnitBusyForTest(ComputeUnitKind kind) const
     return false;
 }
 
-DetailedCuteBackend::ComputeUnitKind
-DetailedCuteBackend::activeComputeUnitForTest() const
-{
-    if (computeTasks.empty()) {
-        return ComputeUnitKind::None;
-    }
-    const auto &task = computeTasks.front();
-    if (task.adcReadIssued && !task.adcReadComplete) {
-        return ComputeUnitKind::ADC;
-    }
-    if (task.bdcReadIssued && !task.bdcReadComplete) {
-        return ComputeUnitKind::BDC;
-    }
-    if (task.cdcReadIssued && !task.cdcReadComplete) {
-        return ComputeUnitKind::CDC;
-    }
-    return computeTasks.front().activeUnit;
-}
-
 bool
 DetailedCuteBackend::computeUnitAvailable(ComputeUnitKind kind) const
 {
-    return !computeUnitBusyForTest(kind);
+    return !computeUnitBusy(kind);
 }
 
 } // namespace matrix

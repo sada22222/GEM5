@@ -108,31 +108,16 @@ LocalMmuModel::pendingCount() const
     return count;
 }
 
-bool
-LocalMmuModel::peekNextRequest(Request &request) const
+std::optional<size_t>
+LocalMmuModel::nextRequestIndex() const
 {
     for (size_t offset = 0; offset < ClientCount; ++offset) {
         const auto index = (firstRequestIndex + offset) % ClientCount;
         if (!pending[index].empty()) {
-            request = pending[index].front();
-            return true;
+            return index;
         }
     }
-    return false;
-}
-
-bool
-LocalMmuModel::takeNextRequest(Request &request)
-{
-    for (size_t offset = 0; offset < ClientCount; ++offset) {
-        const auto index = (firstRequestIndex + offset) % ClientCount;
-        if (!pending[index].empty()) {
-            request = pending[index].front();
-            pending[index].pop_front();
-            return true;
-        }
-    }
-    return false;
+    return std::nullopt;
 }
 
 bool
@@ -153,13 +138,16 @@ bool
 LocalMmuModel::issueRequest(uint64_t ready_cycle, IssuedRequest &issued_request,
                             const IssueAdmission *admission)
 {
-    if (pendingCount() == 0 || outstanding.size() >= config.maxOutstanding) {
+    if (outstanding.size() >= config.maxOutstanding) {
         return false;
     }
 
-    Request request;
-    const bool can_peek = peekNextRequest(request);
-    assert(can_peek);
+    const auto request_index = nextRequestIndex();
+    if (!request_index.has_value()) {
+        return false;
+    }
+
+    Request request = pending[*request_index].front();
     if (admission != nullptr && !(*admission)(request)) {
         return false;
     }
@@ -169,8 +157,7 @@ LocalMmuModel::issueRequest(uint64_t ready_cycle, IssuedRequest &issued_request,
         return false;
     }
 
-    const bool has_request = takeNextRequest(request);
-    assert(has_request);
+    pending[*request_index].pop_front();
 
     InFlight in_flight;
     in_flight.request = request;
@@ -183,6 +170,16 @@ LocalMmuModel::issueRequest(uint64_t ready_cycle, IssuedRequest &issued_request,
     issued_request.metadata = request.metadata;
     ++issued;
     return true;
+}
+
+std::deque<LocalMmuModel::InFlight>::iterator
+LocalMmuModel::findOutstanding(uint32_t source_id)
+{
+    return std::find_if(
+        outstanding.begin(), outstanding.end(),
+        [source_id](const InFlight &in_flight) {
+            return in_flight.sourceId == source_id;
+        });
 }
 
 void
@@ -265,11 +262,7 @@ bool
 LocalMmuModel::completeExternalResponse(
     uint32_t source_id, const uint8_t *data, uint32_t size)
 {
-    auto it = std::find_if(
-        outstanding.begin(), outstanding.end(),
-        [source_id](const InFlight &in_flight) {
-            return in_flight.sourceId == source_id;
-        });
+    auto it = findOutstanding(source_id);
     if (it == outstanding.end()) {
         return false;
     }
@@ -286,11 +279,7 @@ LocalMmuModel::completeExternalResponse(
 bool
 LocalMmuModel::releaseExternalSource(uint32_t source_id)
 {
-    auto it = std::find_if(
-        outstanding.begin(), outstanding.end(),
-        [source_id](const InFlight &in_flight) {
-            return in_flight.sourceId == source_id;
-        });
+    auto it = findOutstanding(source_id);
     if (it == outstanding.end() || !it->responseComplete) {
         return false;
     }
@@ -354,10 +343,9 @@ MatrixL2FillTable::canAccept(const Request &request) const
 }
 
 std::optional<MatrixL2FillTable::Handle>
-MatrixL2FillTable::acceptResponse(const Request &request,
-                                  const uint8_t *data, uint32_t size)
+MatrixL2FillTable::acceptResponse(const Request &request)
 {
-    if (!canAccept(request) || data == nullptr || size == 0) {
+    if (!canAccept(request)) {
         return std::nullopt;
     }
 
@@ -370,10 +358,6 @@ MatrixL2FillTable::acceptResponse(const Request &request,
         slot.valid = true;
         slot.entry = Entry{};
         slot.entry.request = request;
-        const auto copy_size = std::min<size_t>(
-            size, slot.entry.data.size());
-        std::copy(data, data + copy_size, slot.entry.data.begin());
-        slot.entry.dataSize = copy_size;
         slot.entry.remainingFillChunks = request.fillChunks;
         return Handle{index, slot.generation};
     }
@@ -392,14 +376,13 @@ MatrixL2FillTable::canAcceptResponse(const Request &request) const
 }
 
 std::optional<MatrixL2FillTable::Handle>
-MatrixL2FillTable::acceptResponseToBank(const Request &request,
-                                        const uint8_t *data, uint32_t size)
+MatrixL2FillTable::acceptResponseToBank(const Request &request)
 {
     if (!canAcceptResponse(request)) {
         return std::nullopt;
     }
 
-    const auto handle = acceptResponse(request, data, size);
+    const auto handle = acceptResponse(request);
     if (!handle.has_value()) {
         return std::nullopt;
     }
@@ -484,16 +467,6 @@ MatrixL2FillTable::releaseEntry(Handle handle)
     return true;
 }
 
-std::optional<MatrixL2FillTable::Entry>
-MatrixL2FillTable::lookup(Handle handle) const
-{
-    const auto *slot = findSlot(handle);
-    if (slot == nullptr) {
-        return std::nullopt;
-    }
-    return slot->entry;
-}
-
 bool
 MatrixL2FillTable::hasFreeEntry() const
 {
@@ -524,13 +497,6 @@ MatrixL2FillTable::bankFifoOccupancy(unsigned bank) const
         return 0;
     }
     return bankFifos[bank].size();
-}
-
-unsigned
-MatrixL2FillTable::pendingFillChunks(Handle handle) const
-{
-    const auto *slot = findSlot(handle);
-    return slot == nullptr ? 0 : slot->entry.remainingFillChunks;
 }
 
 } // namespace matrix

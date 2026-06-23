@@ -159,7 +159,6 @@ class MatrixRegFile
     void zero(MatrixBankKind bank, size_t reg_idx, uint32_t rows,
               uint32_t cols, MatrixElemType elem_type);
 
-    bool allocated(MatrixBankKind bank, size_t reg_idx) const;
     bool hasAllocatedState() const;
 
   private:

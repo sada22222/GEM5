@@ -52,11 +52,9 @@ struct TimingLoadPlan
 {
     struct Beat
     {
-        static constexpr size_t InvalidTensorByteOffset =
-            static_cast<size_t>(-1);
-
         Addr paddr = 0;
         uint32_t byteSize = 0;
+        uint64_t byteMask = 0;
         std::vector<size_t> tensorByteOffsets;
     };
 
@@ -72,7 +70,6 @@ struct TimingStorePlan
         uint32_t packetSize = 0;
         uint64_t byteMask = 0;
         std::array<uint8_t, 64> lineData = {};
-        std::vector<bool> byteEnable;
     };
 
     size_t tensorBytes = 0;
@@ -112,6 +109,33 @@ lineBase(Addr addr)
     return addr & ~(CacheLineBytes - 1);
 }
 
+template <class Visit>
+inline void
+forEachTensorByte(const AmuLsuDesc &desc,
+                  const TimingAddressTranslator &translate,
+                  Visit &&visit)
+{
+    const size_t bytes_per_elem = elemBytes(desc.elemType);
+    for (uint32_t row = 0; row < desc.row; ++row) {
+        for (uint32_t col = 0; col < desc.column; ++col) {
+            const Addr elem_vaddr = elemAddr(desc, row, col);
+            const Addr elem_paddr = translate ?
+                elem_vaddr : elemPhysAddr(desc, row, col);
+            const size_t elem_index =
+                static_cast<size_t>(row) * desc.column + col;
+            for (size_t byte = 0; byte < bytes_per_elem; ++byte) {
+                const Addr byte_vaddr = elem_vaddr + byte;
+                const Addr byte_paddr = elem_paddr + byte;
+                const Addr line = translate ?
+                    lineBase(byte_vaddr) : lineBase(byte_paddr);
+                const size_t line_offset = translate ?
+                    byte_vaddr - line : byte_paddr - line;
+                visit(line, line_offset, elem_index, byte);
+            }
+        }
+    }
+}
+
 } // namespace timing_load_detail
 
 inline TimingLoadPlan buildTimingLoadPlan(
@@ -134,38 +158,21 @@ buildTimingLoadPlan(const AmuLsuDesc &desc,
     plan.tensorBytes = static_cast<size_t>(desc.row) * desc.column *
                        elemBytes(desc.elemType);
 
-    const size_t bytes_per_elem = elemBytes(desc.elemType);
     std::map<Addr, TimingLoadPlan::Beat> beats_by_vline;
-
-    for (uint32_t row = 0; row < desc.row; ++row) {
-        for (uint32_t col = 0; col < desc.column; ++col) {
-            const Addr elem_vaddr =
-                timing_load_detail::elemAddr(desc, row, col);
-            const Addr elem_paddr = translate ?
-                elem_vaddr : timing_load_detail::elemPhysAddr(desc, row, col);
-            const size_t tensor_offset =
-                (static_cast<size_t>(row) * desc.column + col) *
-                bytes_per_elem;
-            for (size_t byte = 0; byte < bytes_per_elem; ++byte) {
-                const Addr byte_vaddr = elem_vaddr + byte;
-                const Addr byte_addr = elem_paddr + byte;
-                const Addr byte_line = translate ?
-                    timing_load_detail::lineBase(byte_vaddr) :
-                    timing_load_detail::lineBase(byte_addr);
-                auto &byte_beat = beats_by_vline[byte_line];
-                if (byte_beat.tensorByteOffsets.empty()) {
-                    byte_beat.paddr = byte_line;
-                    byte_beat.byteSize = timing_load_detail::CacheLineBytes;
-                    byte_beat.tensorByteOffsets.assign(
-                        timing_load_detail::CacheLineBytes,
-                        TimingLoadPlan::Beat::InvalidTensorByteOffset);
-                }
-                const size_t line_offset = translate ?
-                    byte_vaddr - byte_line : byte_addr - byte_line;
-                byte_beat.tensorByteOffsets[line_offset] = tensor_offset + byte;
+    timing_load_detail::forEachTensorByte(
+        desc, translate,
+        [&](Addr line, size_t line_offset, size_t elem_index, size_t byte) {
+            auto &beat = beats_by_vline[line];
+            if (beat.byteSize == 0) {
+                beat.paddr = line;
+                beat.byteSize = timing_load_detail::CacheLineBytes;
+                beat.tensorByteOffsets.assign(
+                    timing_load_detail::CacheLineBytes, plan.tensorBytes);
             }
-        }
-    }
+            beat.byteMask |= uint64_t(1) << line_offset;
+            beat.tensorByteOffsets[line_offset] =
+                elem_index * elemBytes(desc.elemType) + byte;
+        });
 
     plan.beats.reserve(beats_by_vline.size());
     for (auto &entry : beats_by_vline) {
@@ -227,39 +234,21 @@ buildTimingStorePlan(const AmuLsuDesc &desc, const MatrixTensor &tensor,
     }
 
     std::map<Addr, TimingStorePlan::Beat> beats_by_vline;
-    for (uint32_t row = 0; row < desc.row; ++row) {
-        for (uint32_t col = 0; col < desc.column; ++col) {
-            const size_t tensor_index =
-                static_cast<size_t>(row) * desc.column + col;
-            const Addr elem_vaddr =
-                timing_load_detail::elemAddr(desc, row, col);
-            const Addr elem_paddr = translate ?
-                elem_vaddr : timing_load_detail::elemPhysAddr(desc, row, col);
-            const uint64_t raw = timingStoreElementRaw(
-                desc.elemType, tensor.elements[tensor_index]);
-            for (size_t byte = 0; byte < bytes_per_elem; ++byte) {
-                const Addr byte_vaddr = elem_vaddr + byte;
-                const Addr byte_addr = elem_paddr + byte;
-                const Addr byte_line = translate ?
-                    timing_load_detail::lineBase(byte_vaddr) :
-                    timing_load_detail::lineBase(byte_addr);
-                auto &beat = beats_by_vline[byte_line];
-                if (beat.packetSize == 0) {
-                    beat.paddr = byte_line;
-                    beat.packetSize = timing_load_detail::CacheLineBytes;
-                    beat.byteEnable.assign(
-                        timing_load_detail::CacheLineBytes, false);
-                }
-                const size_t line_offset = translate ?
-                    byte_vaddr - byte_line : byte_addr - byte_line;
-                assert(line_offset < beat.lineData.size());
-                beat.lineData[line_offset] =
-                    static_cast<uint8_t>(raw >> (byte * 8));
-                beat.byteMask |= uint64_t(1) << line_offset;
-                beat.byteEnable[line_offset] = true;
+    timing_load_detail::forEachTensorByte(
+        desc, translate,
+        [&](Addr line, size_t line_offset, size_t elem_index, size_t byte) {
+            auto &beat = beats_by_vline[line];
+            if (beat.packetSize == 0) {
+                beat.paddr = line;
+                beat.packetSize = timing_load_detail::CacheLineBytes;
             }
-        }
-    }
+            const uint64_t raw = timingStoreElementRaw(
+                desc.elemType, tensor.elements[elem_index]);
+            assert(line_offset < beat.lineData.size());
+            beat.lineData[line_offset] =
+                static_cast<uint8_t>(raw >> (byte * 8));
+            beat.byteMask |= uint64_t(1) << line_offset;
+        });
 
     plan.beats.reserve(beats_by_vline.size());
     for (auto &entry : beats_by_vline) {
@@ -282,9 +271,7 @@ scatterTimingLoadResponse(const TimingLoadPlan &plan,
                           uint32_t beat_index,
                           const uint8_t *data,
                           uint32_t data_size,
-                          std::vector<uint8_t> &tensor_bytes,
-                          std::vector<bool> &tensor_byte_valid,
-                          size_t &tensor_bytes_received)
+                          std::vector<uint8_t> &tensor_bytes)
 {
     if (beat_index >= plan.beats.size() || data == nullptr) {
         return false;
@@ -293,25 +280,19 @@ scatterTimingLoadResponse(const TimingLoadPlan &plan,
     const auto &beat = plan.beats[beat_index];
     if (data_size < beat.byteSize ||
         beat.tensorByteOffsets.size() != beat.byteSize ||
-        tensor_bytes.size() != plan.tensorBytes ||
-        tensor_byte_valid.size() != plan.tensorBytes) {
+        tensor_bytes.size() != plan.tensorBytes) {
         return false;
     }
 
     for (uint32_t byte = 0; byte < beat.byteSize; ++byte) {
         const auto tensor_offset = beat.tensorByteOffsets[byte];
-        if (tensor_offset ==
-            TimingLoadPlan::Beat::InvalidTensorByteOffset) {
+        if (tensor_offset == plan.tensorBytes) {
             continue;
         }
         if (tensor_offset >= plan.tensorBytes) {
             return false;
         }
-        if (!tensor_byte_valid[tensor_offset]) {
-            ++tensor_bytes_received;
-        }
         tensor_bytes[tensor_offset] = data[byte];
-        tensor_byte_valid[tensor_offset] = true;
     }
 
     return true;
@@ -322,23 +303,20 @@ class MatrixTimingMemoryAdapter
   public:
     struct Request
     {
-        LocalMmuModel::Request localRequest = {};
-        LocalMmuModel::MatrixL2Metadata metadata = {};
         bool isStore = false;
         Addr paddr = 0;
         uint32_t packetSize = 64;
         uint32_t sourceId = 0;
         ContextID contextId = InvalidContextID;
         std::array<uint8_t, 64> data = {};
-        uint32_t dataSize = 0;
         uint64_t byteMask = 0;
-        std::vector<bool> byteEnable;
     };
 
     virtual ~MatrixTimingMemoryAdapter() = default;
 
     virtual bool connected() const = 0;
     virtual bool sendTimingRequest(const Request &request) = 0;
+    virtual void sendFunctionalStore(const Request &request) = 0;
 };
 
 } // namespace matrix

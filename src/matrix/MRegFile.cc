@@ -350,13 +350,6 @@ MatrixRegFile::zero(MatrixBankKind bank_kind, size_t reg_idx, uint32_t rows,
 }
 
 bool
-MatrixRegFile::allocated(MatrixBankKind bank_kind, size_t reg_idx) const
-{
-    assert(reg_idx < regCount(bank_kind));
-    return bank(bank_kind)[reg_idx].meta.allocated;
-}
-
-bool
 MatrixRegFile::hasAllocatedState() const
 {
     const auto has_allocated = [](const auto &regs) {

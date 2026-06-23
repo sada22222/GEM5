@@ -34,12 +34,6 @@ namespace gem5
 namespace matrix
 {
 
-bool
-DetailedCuteScoreboard::canIssue(const DecodedFifoEntry &entry) const
-{
-    return blockReason(entry) == BlockReason::None;
-}
-
 DetailedCuteScoreboard::BlockReason
 DetailedCuteScoreboard::blockReason(const DecodedFifoEntry &entry) const
 {
@@ -112,9 +106,6 @@ DetailedCuteScoreboard::onLoadIssue(const DecodedFifoEntry &entry)
     auto &fu = fuState(loadFu(entry));
     resetFu(fu);
     fu.busy = true;
-    fu.destValid = entry.writeValid[0];
-    fu.destBank = destBank(entry);
-    fu.destReg = entry.writeRegs[0];
     reserveDest(entry, loadFu(entry));
 }
 
@@ -131,7 +122,6 @@ DetailedCuteScoreboard::onStoreIssue(const DecodedFifoEntry &entry)
     auto &fu = fuState(FuKind::CML);
     resetFu(fu);
     fu.busy = true;
-    setupSrc(fu.srcs[SrcCIdx], MatrixBankKind::C, entry.readRegs[0]);
     incrementPendingReader(entry.readRegs[0], MatrixBankKind::C);
 }
 
@@ -139,17 +129,11 @@ void
 DetailedCuteScoreboard::onStoreReadFinish(const DecodedFifoEntry &entry)
 {
     decrementPendingReader(entry.readRegs[0], MatrixBankKind::C);
-    auto &src = fuState(FuKind::CML).srcs[SrcCIdx];
-    src.readPending = false;
 }
 
 void
 DetailedCuteScoreboard::onStoreWriteFinish(const DecodedFifoEntry &entry)
 {
-    if (entry.readValid[0]) {
-        auto &src = fuState(FuKind::CML).srcs[SrcCIdx];
-        src.readPending = false;
-    }
     resetFu(fuState(FuKind::CML));
 }
 
@@ -158,42 +142,29 @@ DetailedCuteScoreboard::onComputeIssue(const DecodedFifoEntry &entry)
 {
     auto &fu = fuState(FuKind::Compute);
     resetFu(fu);
-    fu.destValid = entry.writeValid[0];
-    fu.destBank = MatrixBankKind::C;
-    fu.destReg = entry.writeRegs[0];
-
-    setupSrc(fu.srcs[SrcAIdx], MatrixBankKind::A, entry.readRegs[0]);
-    setupSrc(fu.srcs[SrcBIdx], MatrixBankKind::B, entry.readRegs[1]);
-    setupSrc(fu.srcs[SrcCIdx], MatrixBankKind::C, entry.readRegs[2]);
+    reserveDest(entry, FuKind::Compute);
 
     incrementPendingReader(entry.readRegs[0], MatrixBankKind::A);
     incrementPendingReader(entry.readRegs[1], MatrixBankKind::B);
     incrementPendingReader(entry.readRegs[2], MatrixBankKind::C);
-    reserveDest(entry, FuKind::Compute);
 }
 
 void
 DetailedCuteScoreboard::onComputeReadFinishA(const DecodedFifoEntry &entry)
 {
-    decrementPendingReader(entry.readRegs[0], MatrixBankKind::A);
-    auto &src = fuState(FuKind::Compute).srcs[SrcAIdx];
-    src.readPending = false;
+    onComputeReadFinish(entry, SrcAIdx, MatrixBankKind::A);
 }
 
 void
 DetailedCuteScoreboard::onComputeReadFinishB(const DecodedFifoEntry &entry)
 {
-    decrementPendingReader(entry.readRegs[1], MatrixBankKind::B);
-    auto &src = fuState(FuKind::Compute).srcs[SrcBIdx];
-    src.readPending = false;
+    onComputeReadFinish(entry, SrcBIdx, MatrixBankKind::B);
 }
 
 void
 DetailedCuteScoreboard::onComputeReadFinishC(const DecodedFifoEntry &entry)
 {
-    decrementPendingReader(entry.readRegs[2], MatrixBankKind::C);
-    auto &src = fuState(FuKind::Compute).srcs[SrcCIdx];
-    src.readPending = false;
+    onComputeReadFinish(entry, SrcCIdx, MatrixBankKind::C);
 }
 
 void
@@ -210,9 +181,6 @@ DetailedCuteScoreboard::onArithIssue(const DecodedFifoEntry &entry)
     auto &fu = fuState(fu_kind);
     resetFu(fu);
     fu.busy = true;
-    fu.destValid = entry.writeValid[0];
-    fu.destBank = destBank(entry);
-    fu.destReg = entry.writeRegs[0];
     reserveDest(entry, fu_kind);
 }
 
@@ -249,25 +217,6 @@ DetailedCuteScoreboard::onIssue(const DecodedFifoEntry &entry)
     if (entry.isZeroAcc || entry.isZeroTr) {
         onArithIssue(entry);
     }
-}
-
-bool
-DetailedCuteScoreboard::fuBusyForTest(FuKind fu) const
-{
-    return isFuBusy(fu);
-}
-
-bool
-DetailedCuteScoreboard::regBusyForTest(uint8_t reg, MatrixBankKind bank) const
-{
-    return regStatus(reg, bank).busy;
-}
-
-unsigned
-DetailedCuteScoreboard::pendingReadersForTest(uint8_t reg,
-                                              MatrixBankKind bank) const
-{
-    return regStatus(reg, bank).pendingReaders;
 }
 
 DetailedCuteScoreboard::FuState &
@@ -386,39 +335,16 @@ DetailedCuteScoreboard::destHasPendingReaders(const DecodedFifoEntry &entry) con
 }
 
 void
-DetailedCuteScoreboard::resetSrc(SrcState &src)
-{
-    src = {};
-}
-
-void
 DetailedCuteScoreboard::resetFu(FuState &fu)
 {
     fu.busy = false;
-    fu.destValid = false;
-    fu.destBank = MatrixBankKind::A;
-    fu.destReg = 0;
-    for (auto &src : fu.srcs) {
-        resetSrc(src);
-    }
 }
 
 void
-DetailedCuteScoreboard::setupSrc(SrcState &src, MatrixBankKind bank, uint8_t reg)
+DetailedCuteScoreboard::onComputeReadFinish(
+    const DecodedFifoEntry &entry, size_t src_idx, MatrixBankKind bank)
 {
-    src.valid = true;
-    src.bank = bank;
-    src.reg = reg;
-
-    const auto &status = regStatus(reg, bank);
-    if (status.busy) {
-        src.ready = false;
-        src.waitFu = status.writer;
-    } else {
-        src.ready = true;
-        src.waitFu = FuKind::None;
-    }
-    src.readPending = true;
+    decrementPendingReader(entry.readRegs[src_idx], bank);
 }
 
 void
@@ -443,7 +369,6 @@ DetailedCuteScoreboard::releaseDest(const DecodedFifoEntry &entry, FuKind writer
     if (status.busy && status.writer == writer) {
         status.busy = false;
         status.writer = FuKind::None;
-        wakeupConsumers(entry.writeRegs[0], destBank(entry), writer);
     }
 }
 
@@ -459,29 +384,6 @@ DetailedCuteScoreboard::decrementPendingReader(uint8_t reg, MatrixBankKind bank)
     auto &status = regStatus(reg, bank);
     if (status.pendingReaders > 0) {
         --status.pendingReaders;
-    }
-}
-
-void
-DetailedCuteScoreboard::wakeupConsumers(uint8_t reg, MatrixBankKind bank,
-                                        FuKind producer)
-{
-    for (size_t fu_idx = 0; fu_idx < static_cast<size_t>(FuKind::Count);
-         ++fu_idx) {
-        auto &fu = fuStates[fu_idx];
-        if (!fu.busy) {
-            continue;
-        }
-        for (auto &src : fu.srcs) {
-            if (!src.valid) {
-                continue;
-            }
-            if (src.bank == bank && src.reg == reg &&
-                src.waitFu == producer) {
-                src.ready = true;
-                src.waitFu = FuKind::None;
-            }
-        }
     }
 }
 

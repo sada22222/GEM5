@@ -34,8 +34,6 @@
 #include <cstdint>
 #include <deque>
 #include <optional>
-#include <string>
-#include <vector>
 
 #include "matrix/LocalMMUModel.hh"
 #include "matrix/MRegFile.hh"
@@ -73,64 +71,6 @@ class DetailedCuteBackend : public MatrixBackend
         Count
     };
 
-    enum class FifoBlockReason : uint8_t
-    {
-        ReleasePendingStore = 0,
-        DownstreamNotAccepting = 1,
-        Count = 2
-    };
-
-    struct TraceCounters
-    {
-        uint64_t fifoEnqueue = 0;
-        uint64_t fifoDequeue = 0;
-        uint64_t fifoBlock = 0;
-        uint64_t scoreboardBlock = 0;
-        uint64_t backendCompletion = 0;
-        uint64_t microtaskIssue = 0;
-        uint64_t microtaskOccupy = 0;
-        uint64_t microtaskFinish = 0;
-        uint64_t microtaskLatencySum = 0;
-        uint64_t lastMicrotaskLatency = 0;
-        uint64_t localMmuLoadBeatsEnqueued = 0;
-        uint64_t localMmuStoreBeatsEnqueued = 0;
-        uint64_t localMmuBeatsIssued = 0;
-        uint64_t localMmuReadResponses = 0;
-        uint64_t localMmuStoreAcks = 0;
-        uint64_t matrixL2FillReservations = 0;
-        uint64_t matrixL2FillResponses = 0;
-        uint64_t matrixL2FillRetires = 0;
-        uint64_t matrixL2FillFullStalls = 0;
-        uint64_t matrixL2FillBankFifoFullStalls = 0;
-        uint64_t bmlFillTableResponses = 0;
-        uint64_t bmlBypassResponses = 0;
-        uint64_t bmlBypassWriteChunksQueued = 0;
-        uint64_t bmlBypassWriteChunksGranted = 0;
-        uint64_t bmlBypassWriteChunksStalled = 0;
-        uint64_t matrixRegLoaderWriteChunksQueued = 0;
-        uint64_t matrixRegLoaderWriteChunksGranted = 0;
-        uint64_t matrixRegLoaderWriteChunksStalled = 0;
-        uint64_t mteInputBeatsAccepted = 0;
-        uint64_t mteResultBeatsProduced = 0;
-        uint64_t mteResultFifoStalls = 0;
-        uint64_t cdcWriteBeatsGranted = 0;
-        std::array<uint64_t,
-            static_cast<size_t>(DetailedCuteScoreboard::BlockReason::Count)>
-            scoreboardBlockReasons = {};
-        std::array<uint64_t, static_cast<size_t>(FifoBlockReason::Count)>
-            fifoBlockReasons = {};
-        std::array<uint64_t, static_cast<size_t>(MicroTaskKind::Count)>
-            microtaskIssuesByKind = {};
-        std::array<uint64_t, static_cast<size_t>(MicroTaskKind::Count)>
-            microtaskFinishesByKind = {};
-        std::array<uint64_t, static_cast<size_t>(ComputeUnitKind::Count)>
-            computeUnitIssuesByKind = {};
-        std::array<uint64_t, static_cast<size_t>(ComputeUnitKind::Count)>
-            computeUnitOccupiesByKind = {};
-        std::array<uint64_t, static_cast<size_t>(ComputeUnitKind::Count)>
-            computeUnitFinishesByKind = {};
-    };
-
     struct TimingConfig
     {
         unsigned localMmuLatencyCycles = 1;
@@ -140,7 +80,6 @@ class DetailedCuteBackend : public MatrixBackend
         unsigned matrixReduceWidthBytes = MatrixRegResource::EntryBytes;
         unsigned matrixOutsideDataWidthBytes = 64;
         std::optional<bool> matrixBmlBypassFillTable = std::nullopt;
-        unsigned mteResultFifoDepth = 2;
     };
 
     explicit DetailedCuteBackend(
@@ -167,12 +106,6 @@ class DetailedCuteBackend : public MatrixBackend
         return regFile.hasAllocatedState();
     }
 
-    // Canonical backend-visible matrix state accessor.
-    const MatrixRegFile &matrixState() const { return regFile; }
-    MatrixRegFile &matrixState() { return regFile; }
-    size_t queueDepth() const { return fifo.depth(); }
-    const std::string &name() const { return backendName; }
-    const TraceCounters &traceCounters() const { return counters; }
     void setTimingMemoryAdapter(MatrixTimingMemoryAdapter *adapter)
     {
         timingMemory = adapter;
@@ -182,8 +115,6 @@ class DetailedCuteBackend : public MatrixBackend
         uint32_t size = 0) override;
 
   private:
-    friend class DetailedCuteBackendTestProbe;
-
     enum class TaskStage : uint8_t
     {
         Accepted = 0,
@@ -206,72 +137,55 @@ class DetailedCuteBackend : public MatrixBackend
         TerminalCompletion
     };
 
+    enum class LocalMmuResponseResult : uint8_t
+    {
+        NoMatch,
+        Blocked,
+        Serviced
+    };
+
+    static constexpr size_t ComputeReadAIdx = 0;
+    static constexpr size_t ComputeReadBIdx = 1;
+    static constexpr size_t ComputeReadCIdx = 2;
+    static constexpr size_t ComputeReadCount = 3;
+
     struct TaskSlot
     {
         DecodedFifoEntry entry = {};
         MicroTaskKind microTaskKind = MicroTaskKind::Release;
         TaskStage stage = TaskStage::Accepted;
-        MatrixTensor bufferedTensor = {};
         CuteCompletion bufferedCompletion = {};
-        bool hasBufferedTensor = false;
         bool lsuBeatsEnqueued = false;
         bool lsuLoadFinalized = false;
         unsigned lsuTotalBeats = 0;
         unsigned lsuResponsesReceived = 0;
         unsigned lsuPendingMatrixRegWriteChunks = 0;
-        std::vector<uint8_t> lsuLoadBytes;
-        std::vector<bool> lsuLoadByteValid;
         TimingLoadPlan lsuLoadPlan;
+        std::vector<uint8_t> lsuLoadBytes;
         TimingStorePlan lsuStorePlan;
-        size_t lsuLoadBytesReceived = 0;
-        bool lsuTimingDataComplete = false;
         bool lsuStorePlanInitialized = false;
+        MatrixTensor bufferedTensor = {};
+        bool hasBufferedTensor = false;
         uint64_t issueStep = 0;
-        bool occupancyTraced = false;
     };
 
     struct ComputeTaskState
     {
         DecodedFifoEntry entry = {};
-        MatrixTensor bufferedTensor = {};
-        MatrixTensor bufferedTensorA = {};
-        MatrixTensor bufferedTensorB = {};
-        MatrixTensor bufferedTensorC = {};
         CuteCompletion bufferedCompletion = {};
+        MatrixTensor bufferedTensor = {};
+        std::array<MatrixTensor, ComputeReadCount> readTensors = {};
         bool hasBufferedTensor = false;
-        bool hasBufferedTensorA = false;
-        bool hasBufferedTensorB = false;
-        bool hasBufferedTensorC = false;
-        bool adcReadIssued = false;
-        bool bdcReadIssued = false;
-        bool cdcReadIssued = false;
-        bool adcReadComplete = false;
-        bool bdcReadComplete = false;
-        bool cdcReadComplete = false;
+        std::array<bool, ComputeReadCount> readTensorValid = {};
+        std::array<bool, ComputeReadCount> readIssued = {};
+        std::array<bool, ComputeReadCount> readComplete = {};
         ComputeUnitKind activeUnit = ComputeUnitKind::None;
         bool unitWorkDone = false;
         unsigned executeCyclesRemaining = 0;
         unsigned cdcWritebackBeatsTotal = 0;
         unsigned cdcWritebackBeatsRemaining = 0;
-        unsigned cdcWritebackBeatsDone = 0;
-        unsigned mteInputBeatsTotal = 0;
-        unsigned mteInputBeatsAccepted = 0;
-        unsigned mteResultBeatsProduced = 0;
-        unsigned mteResultBeatsWritten = 0;
-        unsigned mtePipelineTailCycles = 0;
-        bool streamingMteActive = false;
-        bool streamingResultPrepared = false;
-        std::deque<uint64_t> mteResultReadySteps;
-        std::deque<unsigned> mteResultFifo;
-        bool cdcTileReadIssued = false;
-        bool cdcTileWriteReady = false;
-        unsigned cdcTileReadBeatIndex = 0;
-        MatrixTensor cdcTileWriteTensor = {};
-        bool hasCdcTileWriteTensor = false;
         uint64_t issueStep = 0;
         uint64_t unitIssueStep = 0;
-        bool occupancyTraced = false;
-        bool unitOccupancyTraced = false;
         bool terminalIssued = false;
     };
 
@@ -292,17 +206,8 @@ class DetailedCuteBackend : public MatrixBackend
         bool timingLoadRecorded = false;
     };
 
-    bool canDownstreamAccept(const DecodedFifoEntry &entry) const;
-    bool amlReady() const { return !amlTask.has_value(); }
-    bool bmlReady() const { return !bmlTask.has_value(); }
-    bool cmlReady() const { return !cmlTask.has_value(); }
-    bool loadPathReady(const DecodedFifoEntry &entry) const;
-    bool storePathReady(const DecodedFifoEntry &entry) const;
-    bool computePathReady(const DecodedFifoEntry &entry) const;
-    bool arithPathReady(const DecodedFifoEntry &entry) const;
-    bool releasePathReady(const DecodedFifoEntry &entry) const;
-    bool computeUnitBusyForTest(ComputeUnitKind kind) const;
-    ComputeUnitKind activeComputeUnitForTest() const;
+    bool issuePathReady(const DecodedFifoEntry &entry) const;
+    bool computeUnitBusy(ComputeUnitKind kind) const;
     bool computeUnitAvailable(ComputeUnitKind kind) const;
     bool releaseReady() const
     {
@@ -325,7 +230,6 @@ class DetailedCuteBackend : public MatrixBackend
     void serviceLocalMmuResponses();
     void issueLocalMmuTimingRequest();
     bool useTimingMemory() const;
-    void traceActiveComputeTasks();
     void serviceActiveComputeUnits();
     void dispatchReadyComputeUnits();
     void advanceLoadFill(TaskSlot &task);
@@ -335,38 +239,53 @@ class DetailedCuteBackend : public MatrixBackend
     void initializeTimingStoreBuffer(TaskSlot &task);
     bool recordTimingLoadResponse(
         TaskSlot &task, const LocalMmuModel::Response &response);
+    bool sendFunctionalStoreBeat(
+        TaskSlot &task, const LocalMmuModel::Response &response);
     bool buildTensorFromTimingLoadData(TaskSlot &task);
     LocalMmuModel::Client localMmuClient(const TaskSlot &task) const;
+    void releaseLocalMmuSource(const LocalMmuModel::Response &response);
     unsigned matrixL2FillChunksForResponse(uint32_t byte_size) const;
     bool bmlBypassFillTableEnabled() const;
     bool useBmlBypassForResponse(
+        const TaskSlot &task, const LocalMmuModel::Response &response) const;
+    LocalMmuResponseResult serviceLocalMmuResponse(
+        std::optional<TaskSlot> &slot, PendingLocalMmuResponse &pending);
+    LocalMmuResponseResult serviceLocalMmuReadResponse(
+        TaskSlot &task, PendingLocalMmuResponse &pending);
+    LocalMmuResponseResult serviceBmlBypassResponse(
+        TaskSlot &task, PendingLocalMmuResponse &pending,
+        unsigned fill_chunks);
+    LocalMmuResponseResult serviceFillTableResponse(
+        TaskSlot &task, const LocalMmuModel::Response &response,
+        unsigned fill_chunks);
+    LocalMmuResponseResult finishLocalMmuStoreAck(
+        TaskSlot &task, const LocalMmuModel::Response &response);
+    void traceLocalMmuResponse(
         const TaskSlot &task, const LocalMmuModel::Response &response) const;
     bool enqueueLocalMmuBeats(TaskSlot &task);
     void serviceLsuMatrixRegWriteChunks();
     bool noteLsuMatrixRegWriteDrain(
         const MatrixL2FillTable::DrainCandidate &candidate);
     bool issueComputeReadFrontend(ComputeTaskState &task);
-    void advanceComputeReadA(ComputeTaskState &task);
-    void advanceComputeReadB(ComputeTaskState &task);
-    void advanceComputeReadC(ComputeTaskState &task);
+    void advanceComputeRead(ComputeTaskState &task, size_t read_idx);
     void advanceComputeExecute(ComputeTaskState &task);
-    void advanceStreamingMte(ComputeTaskState &task);
-    bool prepareStreamingComputeResult(ComputeTaskState &task);
-    bool writeStreamingCdcResult(ComputeTaskState &task, unsigned beat);
     void advanceComputeWriteback(ComputeTaskState &task);
-    bool issueCdcTileRead(ComputeTaskState &task);
-    bool prepareCdcTileWrite(ComputeTaskState &task);
+    void enqueueTaskEvent(const DecodedFifoEntry &entry,
+                          MicroTaskKind micro_task_kind,
+                          TaskEventKind event_kind,
+                          uint64_t issue_step,
+                          CuteCompletion completion = {});
     void enqueueTaskEvent(const TaskSlot &task, TaskEventKind kind,
                           CuteCompletion completion = {});
     void enqueueTaskEvent(const ComputeTaskState &task, TaskEventKind kind,
                           CuteCompletion completion = {});
+    void traceTaskEvent(const TaskEvent &event) const;
     void applyWriteFinish(const DecodedFifoEntry &entry,
                           const CuteCompletion &completion,
                           MicroTaskKind kind);
     void retireTaskSlot(MicroTaskKind kind, uint64_t seq);
     void retireComputeTask(uint64_t seq);
     uint64_t finalizeCompletion(const CuteCompletion &completion,
-                                MicroTaskKind kind,
                                 uint64_t issueStep,
                                 uint64_t activeCount);
     void processTaskEvents();
@@ -380,20 +299,21 @@ class DetailedCuteBackend : public MatrixBackend
     bool computeDatatypeSupported(const AmuMmaDesc &desc) const;
     void finishTaskSlot(std::optional<TaskSlot> &slot);
     void beginComputeUnit(ComputeTaskState &task, ComputeUnitKind kind);
-    CuteCompletion executeMma(uint64_t seq, const AmuMmaDesc &desc,
-                              MatrixRegFile &state);
     CuteCompletion executeArith(uint64_t seq, const AmuArithDesc &desc,
                                 MatrixRegFile &state);
-    void recordComputeUnitIssue(ComputeUnitKind kind);
-    void recordComputeUnitOccupy(ComputeUnitKind kind);
-    void recordComputeUnitFinish(ComputeUnitKind kind);
-    bool computeTaskFinishedMte(const ComputeTaskState &task) const;
+    void traceComputeUnitFinish(const ComputeTaskState &task,
+                                ComputeUnitKind kind) const;
+    void finishComputeUnit(ComputeTaskState &task, ComputeUnitKind kind,
+                           bool mark_work_done = false);
+    void enqueueComputeCompletion(ComputeTaskState &task,
+                                  CuteCompletion completion);
+    void finishComputeTerminal(ComputeTaskState &task,
+                               CuteCompletion completion,
+                               bool grant_all_cdc_beats = false,
+                               bool record_cdc_finish = true);
     MicroTaskKind microTaskKindForEntry(const DecodedFifoEntry &entry) const;
-    bool microTaskAvailable(MicroTaskKind kind) const;
     bool useMemoryBudget();
     MatrixBankKind destBank(const DecodedFifoEntry &entry) const;
-    void recordScoreboardBlock(DetailedCuteScoreboard::BlockReason reason);
-    void recordFifoBlock(FifoBlockReason reason);
     size_t activeTaskCount() const;
 
   private:
@@ -416,8 +336,6 @@ class DetailedCuteBackend : public MatrixBackend
     unsigned pendingStoreCount = 0;
     unsigned memoryBudget = 1;
     uint64_t backendStep = 0;
-    std::string backendName = "DetailedCuteBackend";
-    TraceCounters counters = {};
 };
 
 } // namespace matrix

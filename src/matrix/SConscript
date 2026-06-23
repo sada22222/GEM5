@@ -9,7 +9,6 @@ Source('TaskController.cc')
 Source('CUTETOP.cc')
 Source('Scoreboard.cc')
 Source('MRegFile.cc')
-Source('MemoryLoader.cc')
 Source('MatrixTE.cc')
 
 GTest('local_mmu_model.test', 'local_mmu_model.test.cc',

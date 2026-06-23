@@ -67,8 +67,6 @@ struct MatrixTensor
     uint32_t cols = 0;
     MatrixElemType elemType = MatrixElemType::Int8;
     std::vector<int64_t> elements;
-
-    bool valid() const { return rows != 0 || cols != 0 || !elements.empty(); }
 };
 
 enum class MatrixArithOpcode : uint8_t

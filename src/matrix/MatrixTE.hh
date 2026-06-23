@@ -37,24 +37,8 @@ namespace matrix
 
 struct MteTiming
 {
-    unsigned tensorMn = 0;
-    unsigned tensorK = 0;
-    unsigned matrixMn = 0;
-    unsigned reduceWidthBytes = 0;
-    unsigned resultWidthBytes = 0;
-    unsigned aBytesPerBeat = 0;
-    unsigned bBytesPerBeat = 0;
-    unsigned cBytesPerBeat = 0;
-    unsigned dBytesPerBeat = 0;
     unsigned acceptedInputBeats = 0;
-    unsigned adcReadCycles = 0;
-    unsigned bdcReadCycles = 0;
-    unsigned cdcReadCycles = 0;
-    unsigned mteAcceptedInputBeats = 0;
-    unsigned fReduceTailCycles = 0;
     unsigned cdcWriteCycles = 0;
-    unsigned terminalHandshakeCycles = 0;
-    unsigned totalCompletionCycles = 0;
     bool supported = false;
 };
 

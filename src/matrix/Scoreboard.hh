@@ -32,7 +32,6 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
-#include <string>
 #include <vector>
 
 #include "matrix/TaskController.hh"
@@ -57,23 +56,9 @@ class DetailedCuteScoreboard
         Count = 5
     };
 
-    struct SrcState
-    {
-        bool valid = false;
-        MatrixBankKind bank = MatrixBankKind::A;
-        uint8_t reg = 0;
-        bool ready = false;
-        FuKind waitFu = FuKind::None;
-        bool readPending = false;
-    };
-
     struct FuState
     {
         bool busy = false;
-        bool destValid = false;
-        MatrixBankKind destBank = MatrixBankKind::A;
-        uint8_t destReg = 0;
-        std::array<SrcState, 3> srcs = {};
     };
 
     enum class BlockReason : uint8_t
@@ -92,24 +77,16 @@ class DetailedCuteScoreboard
     {
     }
 
-    bool canIssue(const DecodedFifoEntry &entry) const;
     BlockReason blockReason(const DecodedFifoEntry &entry) const;
-    void onLoadIssue(const DecodedFifoEntry &entry);
     void onLoadFinish(const DecodedFifoEntry &entry);
-    void onStoreIssue(const DecodedFifoEntry &entry);
     void onStoreReadFinish(const DecodedFifoEntry &entry);
     void onStoreWriteFinish(const DecodedFifoEntry &entry);
-    void onComputeIssue(const DecodedFifoEntry &entry);
     void onComputeReadFinishA(const DecodedFifoEntry &entry);
     void onComputeReadFinishB(const DecodedFifoEntry &entry);
     void onComputeReadFinishC(const DecodedFifoEntry &entry);
     void onComputeWriteFinishC(const DecodedFifoEntry &entry);
-    void onArithIssue(const DecodedFifoEntry &entry);
     void onArithFinish(const DecodedFifoEntry &entry);
     void onIssue(const DecodedFifoEntry &entry);
-    bool fuBusyForTest(FuKind fu) const;
-    bool regBusyForTest(uint8_t reg, MatrixBankKind bank) const;
-    unsigned pendingReadersForTest(uint8_t reg, MatrixBankKind bank) const;
 
   private:
     struct RegState
@@ -139,14 +116,17 @@ class DetailedCuteScoreboard
     bool destBusy(const DecodedFifoEntry &entry) const;
     bool sourceHasPendingReaders(const DecodedFifoEntry &entry, size_t src_idx) const;
     bool destHasPendingReaders(const DecodedFifoEntry &entry) const;
-    void resetSrc(SrcState &src);
     void resetFu(FuState &fu);
-    void setupSrc(SrcState &src, MatrixBankKind bank, uint8_t reg);
+    void onLoadIssue(const DecodedFifoEntry &entry);
+    void onStoreIssue(const DecodedFifoEntry &entry);
+    void onComputeIssue(const DecodedFifoEntry &entry);
+    void onComputeReadFinish(
+        const DecodedFifoEntry &entry, size_t src_idx, MatrixBankKind bank);
+    void onArithIssue(const DecodedFifoEntry &entry);
     void reserveDest(const DecodedFifoEntry &entry, FuKind writer);
     void releaseDest(const DecodedFifoEntry &entry, FuKind writer);
     void incrementPendingReader(uint8_t reg, MatrixBankKind bank);
     void decrementPendingReader(uint8_t reg, MatrixBankKind bank);
-    void wakeupConsumers(uint8_t reg, MatrixBankKind bank, FuKind producer);
 };
 
 } // namespace matrix

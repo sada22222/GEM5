@@ -166,6 +166,7 @@ class CPU : public BaseCPU
 
         bool connected() const override { return isConnected(); }
         bool sendTimingRequest(const Request &request) override;
+        void sendFunctionalStore(const Request &request) override;
 
       protected:
         bool recvTimingResp(PacketPtr pkt) override;
@@ -176,12 +177,10 @@ class CPU : public BaseCPU
         {
             SenderState(uint32_t source_id, bool is_store,
                         uint64_t byte_mask,
-                        bool awaiting_store_invalidate=false,
-                        const Request &store_request={})
+                        bool awaiting_store_invalidate=false)
                 : sourceId(source_id), isStore(is_store),
                   byteMask(byte_mask),
-                  awaitingStoreInvalidate(awaiting_store_invalidate),
-                  storeRequest(store_request)
+                  awaitingStoreInvalidate(awaiting_store_invalidate)
             {
             }
 
@@ -189,7 +188,6 @@ class CPU : public BaseCPU
             bool isStore = false;
             uint64_t byteMask = 0;
             bool awaitingStoreInvalidate = false;
-            Request storeRequest = {};
         };
 
         PacketPtr buildTimingPacket(const Request &request);

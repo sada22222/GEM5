@@ -142,10 +142,10 @@ class LocalMmuModel
     static size_t clientIndex(Client client);
     static uint64_t byteMaskForSize(uint32_t byte_size);
     static MatrixL2Metadata normalizedMetadata(const Request &request);
-    bool peekNextRequest(Request &request) const;
-    bool takeNextRequest(Request &request);
+    std::optional<size_t> nextRequestIndex() const;
     bool issueRequest(uint64_t ready_cycle, IssuedRequest &issued_request,
                       const IssueAdmission *admission = nullptr);
+    std::deque<InFlight>::iterator findOutstanding(uint32_t source_id);
     bool allocateSource(uint32_t &source_id);
     void freeSource(uint32_t source_id);
     void queueResponse(
@@ -203,8 +203,6 @@ class MatrixL2FillTable
     struct Entry
     {
         Request request = {};
-        uint32_t dataSize = 0;
-        std::array<uint8_t, 64> data = {};
         unsigned remainingFillChunks = 0;
     };
 
@@ -222,24 +220,14 @@ class MatrixL2FillTable
     explicit MatrixL2FillTable(Config config);
 
     bool canAccept(const Request &request) const;
-    std::optional<Handle> acceptResponse(const Request &request,
-                                         const uint8_t *data,
-                                         uint32_t size);
     bool canAcceptResponse(const Request &request) const;
-    std::optional<Handle> acceptResponseToBank(const Request &request,
-                                               const uint8_t *data,
-                                               uint32_t size);
+    std::optional<Handle> acceptResponseToBank(const Request &request);
     std::optional<DrainCandidate> drainCandidate(unsigned bank) const;
     bool retireDrain(const DrainCandidate &candidate);
-    bool retireFillChunk(Handle handle);
-    bool releaseEntry(Handle handle);
 
-    std::optional<Entry> lookup(Handle handle) const;
     bool hasFreeEntry() const;
-    bool entryReadyToRelease(Handle handle) const;
     size_t reservedCount() const;
     size_t bankFifoOccupancy(unsigned bank) const;
-    unsigned pendingFillChunks(Handle handle) const;
 
   private:
     struct Slot
@@ -251,6 +239,10 @@ class MatrixL2FillTable
 
     Slot *findSlot(Handle handle);
     const Slot *findSlot(Handle handle) const;
+    std::optional<Handle> acceptResponse(const Request &request);
+    bool retireFillChunk(Handle handle);
+    bool releaseEntry(Handle handle);
+    bool entryReadyToRelease(Handle handle) const;
 
     Config config;
     std::vector<Slot> slots;

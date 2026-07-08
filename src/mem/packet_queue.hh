@@ -175,6 +175,8 @@ class PacketQueue : public Drainable
     Tick lastDeferredPacketReadyTime() const
     { return transmitList.empty() ? MaxTick : transmitList.back().tick; }
 
+    bool isWaitingOnRetry() const { return waitingOnRetry; }
+
     /**
      * Check if a packet corresponding to the same address exists in the
      * queue.

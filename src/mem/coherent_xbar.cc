@@ -73,7 +73,21 @@ CoherentXBar::CoherentXBar(const CoherentXBarParams &p)
       ADD_STAT(blockedRespCountByCmd, statistics::units::Count::get(),
                "Response blocked count by command type"),
       ADD_STAT(snoopFanout, statistics::units::Count::get(),
-               "Request fanout histogram")
+               "Request fanout histogram"),
+      ADD_STAT(matrixCLoadLowerReqAttempts,
+               statistics::units::Count::get(),
+               "matrix CLoad lower requests seen by coherent xbar"),
+      ADD_STAT(matrixCLoadLowerReqSent,
+               statistics::units::Count::get(),
+               "matrix CLoad lower requests forwarded by coherent xbar"),
+      ADD_STAT(matrixCLoadLowerReqLayerBlocked,
+               statistics::units::Count::get(),
+               "matrix CLoad lower requests blocked by coherent xbar request "
+               "layer"),
+      ADD_STAT(matrixCLoadLowerReqPeerBlocked,
+               statistics::units::Count::get(),
+               "matrix CLoad lower requests rejected by coherent xbar "
+               "downstream peer")
 {
     assert(hintWakeUpAheadCycles <= responseLatency);
     // create the ports based on the size of the memory-side port and
@@ -178,6 +192,18 @@ CoherentXBar::init()
 }
 
 bool
+CoherentXBar::isMatrixCLoadLowerRequest(const PacketPtr pkt) const
+{
+    if (pkt == nullptr || pkt->req == nullptr || !pkt->isRequest() ||
+        pkt->cmd != MemCmd::ReadExReq || !pkt->req->hasXsMetadata()) {
+        return false;
+    }
+
+    const auto xs_metadata = pkt->req->getXsMetadata();
+    return xs_metadata.matrixTask() && xs_metadata.matrixModify();
+}
+
+bool
 CoherentXBar::recvTimingReq(PacketPtr pkt, PortID cpu_side_port_id)
 {
     // determine the source port based on the id
@@ -192,6 +218,10 @@ CoherentXBar::recvTimingReq(PacketPtr pkt, PortID cpu_side_port_id)
 
     // determine the destination based on the destination address range
     PortID mem_side_port_id = findPort(pkt->getAddrRange());
+    const bool matrix_c_load_lower_req = isMatrixCLoadLowerRequest(pkt);
+    if (matrix_c_load_lower_req) {
+        ++matrixCLoadLowerReqAttempts;
+    }
 
     // test if the crossbar should be considered occupied for the current
     // port, and exclude express snoops from the check
@@ -200,6 +230,9 @@ CoherentXBar::recvTimingReq(PacketPtr pkt, PortID cpu_side_port_id)
         DPRINTF(CoherentXBar, "%s: src %s packet %s BUSY\n", __func__,
                 src_port->name(), pkt->print());
         blockedReqCountByCmd[pkt->cmdToIndex()]++;
+        if (matrix_c_load_lower_req) {
+            ++matrixCLoadLowerReqLayerBlocked;
+        }
         return false;
     }
 
@@ -326,6 +359,13 @@ CoherentXBar::recvTimingReq(PacketPtr pkt, PortID cpu_side_port_id)
             DPRINTF(CoherentXBar, "%s: Forwarding %s to port %s\n", __func__,
                     pkt->print(), memSidePorts[mem_side_port_id]->name());
             success = memSidePorts[mem_side_port_id]->sendTimingReq(pkt);
+            if (matrix_c_load_lower_req) {
+                if (success) {
+                    ++matrixCLoadLowerReqSent;
+                } else {
+                    ++matrixCLoadLowerReqPeerBlocked;
+                }
+            }
         } else {
             // no need to forward, turn this packet around and respond
             // directly

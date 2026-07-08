@@ -419,6 +419,8 @@ class CoherentXBar : public BaseXBar
      */
     bool sinkPacket(const PacketPtr pkt) const;
 
+    bool isMatrixCLoadLowerRequest(const PacketPtr pkt) const;
+
     /**
      * Determine if the crossbar should forward the packet, as opposed to
      * responding to it.
@@ -451,6 +453,11 @@ class CoherentXBar : public BaseXBar
     statistics::Vector blockedRespCountByCmd;
 
     statistics::Distribution snoopFanout;
+
+    statistics::Scalar matrixCLoadLowerReqAttempts;
+    statistics::Scalar matrixCLoadLowerReqSent;
+    statistics::Scalar matrixCLoadLowerReqLayerBlocked;
+    statistics::Scalar matrixCLoadLowerReqPeerBlocked;
 
   public:
 

@@ -52,6 +52,7 @@
 #include <cstdint>
 #include <queue>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "base/addr_range.hh"
@@ -248,6 +249,8 @@ class BaseCache : public ClockedObject, public CacheAccessor
         }
 
         bool hasSchedSendEvent() const { return sendEvent.scheduled(); }
+
+        bool waitingOnReqRetry() const { return isWaitingOnRetry(); }
     };
 
 
@@ -285,6 +288,8 @@ class BaseCache : public ClockedObject, public CacheAccessor
                     const std::string &_label);
 
         bool hasSchedSendEvent() const { return _reqQueue.hasSchedSendEvent(); }
+
+        bool waitingOnReqRetry() const { return _reqQueue.waitingOnReqRetry(); }
     };
 
     /**
@@ -307,6 +312,10 @@ class BaseCache : public ClockedObject, public CacheAccessor
         void clearBlocked();
 
         bool isBlocked() const { return blocked; }
+
+        bool waitingOnRespRetry() const { return queue.isWaitingOnRetry(); }
+
+        size_t queuedRespCount() const { return queue.size(); }
 
       protected:
 
@@ -1361,6 +1370,64 @@ class BaseCache : public ClockedObject, public CacheAccessor
          */
         statistics::Scalar dataContractions;
 
+        statistics::Scalar matrixCLoadHitAccesses;
+        statistics::Scalar matrixCLoadHitBaseAccessCycles;
+        statistics::Scalar matrixCLoadHitBaseAccessCyclesMax;
+        statistics::Scalar matrixCLoadHitRespQueueBacklog;
+        statistics::Scalar matrixCLoadHitRespQueueWaitingOnRetry;
+        statistics::Scalar matrixCLoadHitRespQueueEntries;
+        statistics::Scalar matrixCLoadHitRespQueueEntriesMax;
+        statistics::Scalar matrixCLoadHitRespQueueDelayCycles;
+        statistics::Scalar matrixCLoadHitRespQueueDelayCyclesMax;
+
+        statistics::Scalar matrixCLoadTimingReqAttempts;
+        statistics::Scalar matrixCLoadTimingReqAccepted;
+        statistics::Scalar matrixCLoadTimingReqBlockedByPort;
+        statistics::Scalar matrixCLoadTimingReqBlockedByTag;
+        statistics::Scalar matrixCLoadTimingReqBlockedBySliceBusy;
+        statistics::Scalar matrixCLoadTimingReqBlockedByMshrArb;
+        statistics::Scalar matrixCLoadTimingReqSliceBusyWaitCycles;
+        statistics::Scalar matrixCLoadTimingReqSliceBusyWaitCyclesMax;
+
+        statistics::Scalar matrixCLoadLowerTimingReqAttempts;
+        statistics::Scalar matrixCLoadLowerTimingReqAccepted;
+        statistics::Scalar matrixCLoadLowerTimingReqBlockedByPort;
+        statistics::Scalar matrixCLoadLowerTimingReqBlockedByTag;
+        statistics::Scalar matrixCLoadLowerTimingReqBlockedBySliceBusy;
+        statistics::Scalar matrixCLoadLowerTimingReqBlockedByMshrArb;
+        statistics::Scalar matrixCLoadLowerTimingReqSliceBusyWaitCycles;
+        statistics::Scalar matrixCLoadLowerTimingReqSliceBusyWaitCyclesMax;
+
+        statistics::Scalar matrixCLoadMissMshrAllocations;
+        statistics::Scalar matrixCLoadMissMergedTargets;
+        statistics::Scalar matrixCLoadMissLowerReqFirstAttempt;
+        statistics::Scalar matrixCLoadMissAllocatedWhileReqRetry;
+        statistics::Scalar matrixCLoadMissAllocToReadyCycles;
+        statistics::Scalar matrixCLoadMissAllocToReadyCyclesMax;
+        statistics::Scalar matrixCLoadMissReadyToLowerFirstAttemptCycles;
+        statistics::Scalar matrixCLoadMissReadyToLowerFirstAttemptCyclesMax;
+        statistics::Scalar matrixCLoadMissReqToLowerFirstAttemptCycles;
+        statistics::Scalar matrixCLoadMissReqToLowerFirstAttemptCyclesMax;
+        statistics::Scalar matrixCLoadMissLowerFirstAttemptToSendCycles;
+        statistics::Scalar matrixCLoadMissLowerFirstAttemptToSendCyclesMax;
+        statistics::Scalar matrixCLoadMissLowerReqSent;
+        statistics::Scalar matrixCLoadMissLowerReqSendBlocked;
+        statistics::Scalar matrixCLoadMissReqToLowerSendCycles;
+        statistics::Scalar matrixCLoadMissReqToLowerSendCyclesMax;
+        statistics::Scalar matrixCLoadMissLowerResp;
+        statistics::Scalar matrixCLoadMissLowerSendToRespCycles;
+        statistics::Scalar matrixCLoadMissLowerSendToRespCyclesMax;
+        statistics::Scalar matrixCLoadMissRespToCpuRespSchedCycles;
+        statistics::Scalar matrixCLoadMissRespToCpuRespSchedCyclesMax;
+        statistics::Scalar matrixCLoadMissReqToCpuRespSchedCycles;
+        statistics::Scalar matrixCLoadMissReqToCpuRespSchedCyclesMax;
+        statistics::Scalar matrixCLoadMissCpuRespQueueBacklog;
+        statistics::Scalar matrixCLoadMissCpuRespQueueWaitingOnRetry;
+        statistics::Scalar matrixCLoadMissCpuRespQueueEntries;
+        statistics::Scalar matrixCLoadMissCpuRespQueueEntriesMax;
+        statistics::Scalar matrixCLoadMissCpuRespQueueDelayCycles;
+        statistics::Scalar matrixCLoadMissCpuRespQueueDelayCyclesMax;
+
         /** Per-command statistics */
         std::vector<std::unique_ptr<CacheCmdStats>> cmd;
     } stats;
@@ -1622,6 +1689,9 @@ class BaseCache : public ClockedObject, public CacheAccessor
      */
     bool sendWriteQueuePacket(WriteQueueEntry* wq_entry);
 
+    void recordMatrixCLoadMissCpuRespScheduled(PacketPtr pkt,
+                                               Tick completion_time);
+
     /**
      * Serialize the state of the caches
      *
@@ -1639,6 +1709,34 @@ class BaseCache : public ClockedObject, public CacheAccessor
     const bool dumpMissPC{false};
 
     std::unordered_map<Addr, uint64_t> pcMissCount;
+
+    struct MatrixCLoadMissTiming
+    {
+        Cycles allocCycle;
+        Cycles readyCycle;
+        Cycles lowerFirstAttemptCycle;
+        Cycles lowerSendCycle;
+        Cycles lowerRespCycle;
+        bool allocatedWhileReqRetry = false;
+        bool lowerFirstAttempt = false;
+        bool lowerSent = false;
+        bool lowerResp = false;
+    };
+
+    std::unordered_map<RequestPtr, MatrixCLoadMissTiming>
+        pendingMatrixCLoadMissTiming;
+
+    void recordMatrixCLoadMissAllocated(PacketPtr pkt, Tick ready_time);
+    void recordMatrixCLoadMissMerged(PacketPtr pkt);
+    void recordMatrixCLoadMissLowerReqAttempt(PacketPtr pkt);
+    void recordMatrixCLoadMissLowerReqSent(PacketPtr pkt);
+    void recordMatrixCLoadMissLowerReqBlocked(PacketPtr pkt);
+    void recordMatrixCLoadMissLowerResp(PacketPtr pkt);
+    void recordMatrixCLoadMissLatency(statistics::Scalar &total,
+                                      statistics::Scalar &maximum,
+                                      Cycles latency);
+    bool isMatrixCLoad(PacketPtr pkt) const;
+    bool isMatrixCLoadLowerReq(PacketPtr pkt) const;
 
     // std::set<Addr> forceHitPCs{0x11474, 0x11470, 0x11472, 0x119fa, 0x119fe, 0x119ea};
     std::set<Addr> forceHitPCs{};

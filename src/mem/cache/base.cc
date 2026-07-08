@@ -402,6 +402,7 @@ void
 BaseCache::handleTimingReqHit(PacketPtr pkt, CacheBlk *blk, Tick request_time, bool first_acc_after_pf)
 {
     DPRINTF(Cache, "%s for %s hit\n", __func__, pkt->print());
+    const bool matrix_c_load_hit = isMatrixCLoad(pkt);
     // handle special cases for LockedRMW transactions
     if (pkt->isLockedRMW()) {
         Addr blk_addr = pkt->getBlockAddr(blkSize);
@@ -486,6 +487,32 @@ BaseCache::handleTimingReqHit(PacketPtr pkt, CacheBlk *blk, Tick request_time, b
             this->schedule(new SendTimingRespEvent(this, pkt), request_time);
         }
         else {
+            if (matrix_c_load_hit) {
+                const size_t queued_resps = cpuSidePort.queuedRespCount();
+                if (queued_resps > 0) {
+                    stats.matrixCLoadHitRespQueueEntries += queued_resps;
+                    if (queued_resps >
+                        stats.matrixCLoadHitRespQueueEntriesMax.value()) {
+                        stats.matrixCLoadHitRespQueueEntriesMax =
+                            queued_resps;
+                    }
+                }
+                if (cpuSidePort.waitingOnRespRetry()) {
+                    ++stats.matrixCLoadHitRespQueueWaitingOnRetry;
+                }
+                const Tick last_ready = cpuSidePort.lastReadyTime();
+                if (last_ready != MaxTick) {
+                    ++stats.matrixCLoadHitRespQueueBacklog;
+                    if (last_ready > request_time) {
+                        const Cycles delay =
+                            ticksToCycles(last_ready - request_time);
+                        recordMatrixCLoadMissLatency(
+                            stats.matrixCLoadHitRespQueueDelayCycles,
+                            stats.matrixCLoadHitRespQueueDelayCyclesMax,
+                            delay);
+                    }
+                }
+            }
             cpuSidePort.schedTimingResp(pkt, request_time);
         }
     } else {
@@ -502,6 +529,240 @@ BaseCache::handleTimingReqHit(PacketPtr pkt, CacheBlk *blk, Tick request_time, b
     if (cacheLevel != 1) {
         calculateSliceBusy(pkt, false);
     }
+}
+
+void
+BaseCache::recordMatrixCLoadMissLatency(statistics::Scalar &total,
+                                        statistics::Scalar &maximum,
+                                        Cycles latency)
+{
+    const auto cycles = static_cast<uint64_t>(latency);
+    total += cycles;
+    if (cycles > maximum.value()) {
+        maximum = cycles;
+    }
+}
+
+bool
+BaseCache::isMatrixCLoad(PacketPtr pkt) const
+{
+    if (pkt == nullptr || pkt->req == nullptr ||
+        !pkt->isRequest() || !pkt->isRead() ||
+        !pkt->req->hasXsMetadata()) {
+        return false;
+    }
+
+    const auto xs_metadata = pkt->req->getXsMetadata();
+    return xs_metadata.matrixTask() && xs_metadata.matrixModify();
+}
+
+bool
+BaseCache::isMatrixCLoadLowerReq(PacketPtr pkt) const
+{
+    return pkt != nullptr && pkt->isRequest() &&
+           pkt->cmd == MemCmd::ReadExReq &&
+           dynamic_cast<MSHR *>(pkt->senderState) != nullptr &&
+           isMatrixCLoad(pkt);
+}
+
+void
+BaseCache::recordMatrixCLoadMissAllocated(PacketPtr pkt, Tick ready_time)
+{
+    if (!isMatrixCLoad(pkt)) {
+        return;
+    }
+
+    ++stats.matrixCLoadMissMshrAllocations;
+    const Cycles alloc_cycle = curCycle();
+    Cycles ready_cycle = alloc_cycle;
+    if (ready_time > curTick()) {
+        ready_cycle += ticksToCycles(ready_time - curTick());
+    }
+
+    pendingMatrixCLoadMissTiming[pkt->req] =
+        MatrixCLoadMissTiming{alloc_cycle, ready_cycle, Cycles(0), Cycles(0),
+                              Cycles(0), memSidePort.waitingOnReqRetry(),
+                              false, false, false};
+    if (memSidePort.waitingOnReqRetry()) {
+        ++stats.matrixCLoadMissAllocatedWhileReqRetry;
+    }
+    recordMatrixCLoadMissLatency(
+        stats.matrixCLoadMissAllocToReadyCycles,
+        stats.matrixCLoadMissAllocToReadyCyclesMax,
+        ready_cycle - alloc_cycle);
+}
+
+void
+BaseCache::recordMatrixCLoadMissMerged(PacketPtr pkt)
+{
+    if (isMatrixCLoad(pkt)) {
+        ++stats.matrixCLoadMissMergedTargets;
+    }
+}
+
+void
+BaseCache::recordMatrixCLoadMissLowerReqAttempt(PacketPtr pkt)
+{
+    if (pkt == nullptr || pkt->req == nullptr) {
+        return;
+    }
+
+    auto it = pendingMatrixCLoadMissTiming.find(pkt->req);
+    if (it == pendingMatrixCLoadMissTiming.end()) {
+        return;
+    }
+
+    auto &timing = it->second;
+    if (timing.lowerFirstAttempt) {
+        return;
+    }
+
+    ++stats.matrixCLoadMissLowerReqFirstAttempt;
+    timing.lowerFirstAttempt = true;
+    timing.lowerFirstAttemptCycle = curCycle();
+    const Cycles ready_to_attempt =
+        timing.lowerFirstAttemptCycle > timing.readyCycle ?
+        timing.lowerFirstAttemptCycle - timing.readyCycle : Cycles(0);
+    recordMatrixCLoadMissLatency(
+        stats.matrixCLoadMissReadyToLowerFirstAttemptCycles,
+        stats.matrixCLoadMissReadyToLowerFirstAttemptCyclesMax,
+        ready_to_attempt);
+    recordMatrixCLoadMissLatency(
+        stats.matrixCLoadMissReqToLowerFirstAttemptCycles,
+        stats.matrixCLoadMissReqToLowerFirstAttemptCyclesMax,
+        timing.lowerFirstAttemptCycle - timing.allocCycle);
+}
+
+void
+BaseCache::recordMatrixCLoadMissLowerReqSent(PacketPtr pkt)
+{
+    if (pkt == nullptr || pkt->req == nullptr) {
+        return;
+    }
+
+    auto it = pendingMatrixCLoadMissTiming.find(pkt->req);
+    if (it == pendingMatrixCLoadMissTiming.end()) {
+        return;
+    }
+
+    ++stats.matrixCLoadMissLowerReqSent;
+    auto &timing = it->second;
+    timing.lowerSent = true;
+    timing.lowerSendCycle = curCycle();
+    if (!timing.lowerFirstAttempt) {
+        ++stats.matrixCLoadMissLowerReqFirstAttempt;
+        timing.lowerFirstAttempt = true;
+        timing.lowerFirstAttemptCycle = timing.lowerSendCycle;
+        const Cycles ready_to_attempt =
+            timing.lowerFirstAttemptCycle > timing.readyCycle ?
+            timing.lowerFirstAttemptCycle - timing.readyCycle : Cycles(0);
+        recordMatrixCLoadMissLatency(
+            stats.matrixCLoadMissReadyToLowerFirstAttemptCycles,
+            stats.matrixCLoadMissReadyToLowerFirstAttemptCyclesMax,
+            ready_to_attempt);
+        recordMatrixCLoadMissLatency(
+            stats.matrixCLoadMissReqToLowerFirstAttemptCycles,
+            stats.matrixCLoadMissReqToLowerFirstAttemptCyclesMax,
+            timing.lowerFirstAttemptCycle - timing.allocCycle);
+    }
+    recordMatrixCLoadMissLatency(
+        stats.matrixCLoadMissReqToLowerSendCycles,
+        stats.matrixCLoadMissReqToLowerSendCyclesMax,
+        timing.lowerSendCycle - timing.allocCycle);
+    recordMatrixCLoadMissLatency(
+        stats.matrixCLoadMissLowerFirstAttemptToSendCycles,
+        stats.matrixCLoadMissLowerFirstAttemptToSendCyclesMax,
+        timing.lowerSendCycle - timing.lowerFirstAttemptCycle);
+}
+
+void
+BaseCache::recordMatrixCLoadMissLowerReqBlocked(PacketPtr pkt)
+{
+    if (pkt != nullptr && pkt->req != nullptr &&
+        pendingMatrixCLoadMissTiming.find(pkt->req) !=
+        pendingMatrixCLoadMissTiming.end()) {
+        ++stats.matrixCLoadMissLowerReqSendBlocked;
+    }
+}
+
+void
+BaseCache::recordMatrixCLoadMissLowerResp(PacketPtr pkt)
+{
+    if (pkt == nullptr || pkt->req == nullptr) {
+        return;
+    }
+
+    auto it = pendingMatrixCLoadMissTiming.find(pkt->req);
+    if (it == pendingMatrixCLoadMissTiming.end()) {
+        return;
+    }
+
+    ++stats.matrixCLoadMissLowerResp;
+    auto &timing = it->second;
+    timing.lowerResp = true;
+    timing.lowerRespCycle = curCycle();
+    if (timing.lowerSent) {
+        recordMatrixCLoadMissLatency(
+            stats.matrixCLoadMissLowerSendToRespCycles,
+            stats.matrixCLoadMissLowerSendToRespCyclesMax,
+            timing.lowerRespCycle - timing.lowerSendCycle);
+    }
+}
+
+void
+BaseCache::recordMatrixCLoadMissCpuRespScheduled(PacketPtr pkt,
+                                                 Tick completion_time)
+{
+    if (pkt == nullptr || pkt->req == nullptr) {
+        return;
+    }
+
+    auto it = pendingMatrixCLoadMissTiming.find(pkt->req);
+    if (it == pendingMatrixCLoadMissTiming.end()) {
+        return;
+    }
+
+    Cycles completion_cycle = curCycle();
+    if (completion_time > curTick()) {
+        completion_cycle += ticksToCycles(completion_time - curTick());
+    }
+
+    auto &timing = it->second;
+    if (timing.lowerResp) {
+        recordMatrixCLoadMissLatency(
+            stats.matrixCLoadMissRespToCpuRespSchedCycles,
+            stats.matrixCLoadMissRespToCpuRespSchedCyclesMax,
+            completion_cycle - timing.lowerRespCycle);
+    }
+    recordMatrixCLoadMissLatency(
+        stats.matrixCLoadMissReqToCpuRespSchedCycles,
+        stats.matrixCLoadMissReqToCpuRespSchedCyclesMax,
+        completion_cycle - timing.allocCycle);
+
+    const size_t queued_resps = cpuSidePort.queuedRespCount();
+    if (queued_resps > 0) {
+        stats.matrixCLoadMissCpuRespQueueEntries += queued_resps;
+        if (queued_resps >
+            stats.matrixCLoadMissCpuRespQueueEntriesMax.value()) {
+            stats.matrixCLoadMissCpuRespQueueEntriesMax = queued_resps;
+        }
+    }
+    if (cpuSidePort.waitingOnRespRetry()) {
+        ++stats.matrixCLoadMissCpuRespQueueWaitingOnRetry;
+    }
+    const Tick last_ready = cpuSidePort.lastReadyTime();
+    if (last_ready != MaxTick) {
+        ++stats.matrixCLoadMissCpuRespQueueBacklog;
+        if (last_ready > completion_time) {
+            const Cycles delay = ticksToCycles(last_ready - completion_time);
+            recordMatrixCLoadMissLatency(
+                stats.matrixCLoadMissCpuRespQueueDelayCycles,
+                stats.matrixCLoadMissCpuRespQueueDelayCyclesMax,
+                delay);
+        }
+    }
+
+    pendingMatrixCLoadMissTiming.erase(it);
 }
 
 void
@@ -566,6 +827,7 @@ BaseCache::handleTimingReqMiss(PacketPtr pkt, MSHR *mshr, CacheBlk *blk,
                 if (!checkAndAllocateMSHRCycle(pkt)) {
                     return;
                 }
+                recordMatrixCLoadMissMerged(pkt);
                 // We use forward_time here because it is the same
                 // considering new targets. We have multiple
                 // requests for the same address here. It
@@ -623,6 +885,7 @@ BaseCache::handleTimingReqMiss(PacketPtr pkt, MSHR *mshr, CacheBlk *blk,
             if (!checkAndAllocateMSHRCycle(pkt)) {
                 return;
             }
+            recordMatrixCLoadMissAllocated(pkt, forward_time);
             // Here we are using forward_time, modelling the latency of
             // a miss (outbound) just as forwardLatency, neglecting the
             // lookupLatency component.
@@ -933,6 +1196,7 @@ BaseCache::recvTimingResp(PacketPtr pkt)
     // Initial target is used just for stats
     const QueueEntry::Target *initial_tgt = mshr->getTarget();
     const Tick miss_latency = curTick() - initial_tgt->recvTime;
+    recordMatrixCLoadMissLowerResp(initial_tgt->pkt);
     if (pkt->req->isUncacheable()) {
         assert(pkt->req->requestorId() < system->maxRequestors());
         stats.cmdStats(initial_tgt->pkt)
@@ -2018,6 +2282,19 @@ BaseCache::access(PacketPtr pkt, CacheBlk *&blk, Cycles &lat,
         if (pkt->isRead() || pkt->isWrite()) {
             // Read and Write can succeed after the data block is ready if Cache Hit
             lat = calculateAccessLatency(blk, pkt->headerDelay, tag_latency);
+            if (isMatrixCLoad(pkt)) {
+                const Cycles header_delay = ticksToCycles(pkt->headerDelay);
+                const Cycles base_access = sequentialAccess ?
+                    header_delay + tag_latency + dataLatency :
+                    header_delay + std::max(tag_latency, dataLatency);
+
+                ++stats.matrixCLoadHitAccesses;
+                stats.matrixCLoadHitBaseAccessCycles += base_access;
+                if (base_access >
+                    stats.matrixCLoadHitBaseAccessCyclesMax.value()) {
+                    stats.matrixCLoadHitBaseAccessCyclesMax = base_access;
+                }
+            }
 
             // When a block is compressed, it must first be decompressed
             // before being read. This adds to the access latency.
@@ -2549,6 +2826,8 @@ BaseCache::sendMSHRQueuePacket(MSHR* mshr)
         // we are awaiting a retry, but we
         // delete the packet and will be creating a new packet
         // when we get the opportunity
+        recordMatrixCLoadMissLowerReqAttempt(tgt_pkt);
+        recordMatrixCLoadMissLowerReqBlocked(tgt_pkt);
         delete pkt;
 
         // note that we have now masked any requestBus and
@@ -2565,6 +2844,7 @@ BaseCache::sendMSHRQueuePacket(MSHR* mshr)
         // so, we know it is dirty, and we can determine if it is
         // being passed as Modified, making our MSHR the ordering
         // point
+        recordMatrixCLoadMissLowerReqSent(tgt_pkt);
         bool pending_modified_resp = !pkt->hasSharers() &&
             pkt->cacheResponding();
         markInService(mshr, pending_modified_resp);
@@ -2957,6 +3237,187 @@ BaseCache::CacheStats::CacheStats(BaseCache &c)
              "number of data expansions"),
     ADD_STAT(dataContractions, statistics::units::Count::get(),
              "number of data contractions"),
+    ADD_STAT(matrixCLoadHitAccesses, statistics::units::Count::get(),
+             "number of matrix CLoad cache hit accesses"),
+    ADD_STAT(matrixCLoadHitBaseAccessCycles,
+             statistics::units::Cycle::get(),
+             "sum of matrix CLoad hit base tag/data access cycles"),
+    ADD_STAT(matrixCLoadHitBaseAccessCyclesMax,
+             statistics::units::Cycle::get(),
+             "max matrix CLoad hit base tag/data access cycles"),
+    ADD_STAT(matrixCLoadHitRespQueueBacklog,
+             statistics::units::Count::get(),
+             "matrix CLoad hit responses scheduled behind existing responses"),
+    ADD_STAT(matrixCLoadHitRespQueueWaitingOnRetry,
+             statistics::units::Count::get(),
+             "matrix CLoad hit responses scheduled while response port waits "
+             "for retry"),
+    ADD_STAT(matrixCLoadHitRespQueueEntries,
+             statistics::units::Count::get(),
+             "sum of queued response entries before matrix CLoad hit response"),
+    ADD_STAT(matrixCLoadHitRespQueueEntriesMax,
+             statistics::units::Count::get(),
+             "max queued response entries before matrix CLoad hit response"),
+    ADD_STAT(matrixCLoadHitRespQueueDelayCycles,
+             statistics::units::Cycle::get(),
+             "sum of matrix CLoad hit response queue delay cycles"),
+    ADD_STAT(matrixCLoadHitRespQueueDelayCyclesMax,
+             statistics::units::Cycle::get(),
+             "max matrix CLoad hit response queue delay cycles"),
+    ADD_STAT(matrixCLoadTimingReqAttempts,
+             statistics::units::Count::get(),
+             "matrix CLoad timing request admission attempts"),
+    ADD_STAT(matrixCLoadTimingReqAccepted,
+             statistics::units::Count::get(),
+             "matrix CLoad timing requests accepted by cache port"),
+    ADD_STAT(matrixCLoadTimingReqBlockedByPort,
+             statistics::units::Count::get(),
+             "matrix CLoad timing requests blocked by cache port state"),
+    ADD_STAT(matrixCLoadTimingReqBlockedByTag,
+             statistics::units::Count::get(),
+             "matrix CLoad timing requests blocked by tag access"),
+    ADD_STAT(matrixCLoadTimingReqBlockedBySliceBusy,
+             statistics::units::Count::get(),
+             "matrix CLoad timing requests blocked by slice busy state"),
+    ADD_STAT(matrixCLoadTimingReqBlockedByMshrArb,
+             statistics::units::Count::get(),
+             "matrix CLoad timing requests rejected after MSHR arbitration"),
+    ADD_STAT(matrixCLoadTimingReqSliceBusyWaitCycles,
+             statistics::units::Cycle::get(),
+             "reserved matrix CLoad slice busy wait cycle accumulator"),
+    ADD_STAT(matrixCLoadTimingReqSliceBusyWaitCyclesMax,
+             statistics::units::Cycle::get(),
+             "reserved matrix CLoad max slice busy wait cycles"),
+    ADD_STAT(matrixCLoadLowerTimingReqAttempts,
+             statistics::units::Count::get(),
+             "matrix CLoad lower miss timing request admission attempts"),
+    ADD_STAT(matrixCLoadLowerTimingReqAccepted,
+             statistics::units::Count::get(),
+             "matrix CLoad lower miss timing requests accepted"),
+    ADD_STAT(matrixCLoadLowerTimingReqBlockedByPort,
+             statistics::units::Count::get(),
+             "matrix CLoad lower miss timing requests blocked by port state"),
+    ADD_STAT(matrixCLoadLowerTimingReqBlockedByTag,
+             statistics::units::Count::get(),
+             "matrix CLoad lower miss timing requests blocked by tag access"),
+    ADD_STAT(matrixCLoadLowerTimingReqBlockedBySliceBusy,
+             statistics::units::Count::get(),
+             "matrix CLoad lower miss timing requests blocked by slice busy"),
+    ADD_STAT(matrixCLoadLowerTimingReqBlockedByMshrArb,
+             statistics::units::Count::get(),
+             "matrix CLoad lower miss timing requests rejected after MSHR "
+             "arbitration"),
+    ADD_STAT(matrixCLoadLowerTimingReqSliceBusyWaitCycles,
+             statistics::units::Cycle::get(),
+             "reserved matrix CLoad lower request slice busy wait cycles"),
+    ADD_STAT(matrixCLoadLowerTimingReqSliceBusyWaitCyclesMax,
+             statistics::units::Cycle::get(),
+             "reserved matrix CLoad lower request max slice busy wait cycles"),
+    ADD_STAT(matrixCLoadMissMshrAllocations,
+             statistics::units::Count::get(),
+             "matrix CLoad miss MSHR allocations"),
+    ADD_STAT(matrixCLoadMissMergedTargets,
+             statistics::units::Count::get(),
+             "matrix CLoad miss requests merged into existing MSHRs"),
+    ADD_STAT(matrixCLoadMissLowerReqFirstAttempt,
+             statistics::units::Count::get(),
+             "matrix CLoad misses with a first lower request send attempt"),
+    ADD_STAT(matrixCLoadMissAllocatedWhileReqRetry,
+             statistics::units::Count::get(),
+             "matrix CLoad misses allocated while lower request port waits "
+             "for retry"),
+    ADD_STAT(matrixCLoadMissAllocToReadyCycles,
+             statistics::units::Cycle::get(),
+             "sum of matrix CLoad miss allocation to MSHR ready cycles"),
+    ADD_STAT(matrixCLoadMissAllocToReadyCyclesMax,
+             statistics::units::Cycle::get(),
+             "max matrix CLoad miss allocation to MSHR ready cycles"),
+    ADD_STAT(matrixCLoadMissReadyToLowerFirstAttemptCycles,
+             statistics::units::Cycle::get(),
+             "sum of matrix CLoad miss ready to first lower send attempt "
+             "cycles"),
+    ADD_STAT(matrixCLoadMissReadyToLowerFirstAttemptCyclesMax,
+             statistics::units::Cycle::get(),
+             "max matrix CLoad miss ready to first lower send attempt cycles"),
+    ADD_STAT(matrixCLoadMissReqToLowerFirstAttemptCycles,
+             statistics::units::Cycle::get(),
+             "sum of matrix CLoad miss allocation to first lower send attempt "
+             "cycles"),
+    ADD_STAT(matrixCLoadMissReqToLowerFirstAttemptCyclesMax,
+             statistics::units::Cycle::get(),
+             "max matrix CLoad miss allocation to first lower send attempt "
+             "cycles"),
+    ADD_STAT(matrixCLoadMissLowerFirstAttemptToSendCycles,
+             statistics::units::Cycle::get(),
+             "sum of matrix CLoad miss first lower attempt to successful send "
+             "cycles"),
+    ADD_STAT(matrixCLoadMissLowerFirstAttemptToSendCyclesMax,
+             statistics::units::Cycle::get(),
+             "max matrix CLoad miss first lower attempt to successful send "
+             "cycles"),
+    ADD_STAT(matrixCLoadMissLowerReqSent,
+             statistics::units::Count::get(),
+             "matrix CLoad miss lower requests sent successfully"),
+    ADD_STAT(matrixCLoadMissLowerReqSendBlocked,
+             statistics::units::Count::get(),
+             "matrix CLoad miss lower request send attempts blocked"),
+    ADD_STAT(matrixCLoadMissReqToLowerSendCycles,
+             statistics::units::Cycle::get(),
+             "sum of matrix CLoad miss allocation to successful lower send "
+             "cycles"),
+    ADD_STAT(matrixCLoadMissReqToLowerSendCyclesMax,
+             statistics::units::Cycle::get(),
+             "max matrix CLoad miss allocation to successful lower send "
+             "cycles"),
+    ADD_STAT(matrixCLoadMissLowerResp,
+             statistics::units::Count::get(),
+             "matrix CLoad miss lower responses received"),
+    ADD_STAT(matrixCLoadMissLowerSendToRespCycles,
+             statistics::units::Cycle::get(),
+             "sum of matrix CLoad miss successful lower send to lower response "
+             "cycles"),
+    ADD_STAT(matrixCLoadMissLowerSendToRespCyclesMax,
+             statistics::units::Cycle::get(),
+             "max matrix CLoad miss successful lower send to lower response "
+             "cycles"),
+    ADD_STAT(matrixCLoadMissRespToCpuRespSchedCycles,
+             statistics::units::Cycle::get(),
+             "sum of matrix CLoad miss lower response to CPU response "
+             "schedule cycles"),
+    ADD_STAT(matrixCLoadMissRespToCpuRespSchedCyclesMax,
+             statistics::units::Cycle::get(),
+             "max matrix CLoad miss lower response to CPU response schedule "
+             "cycles"),
+    ADD_STAT(matrixCLoadMissReqToCpuRespSchedCycles,
+             statistics::units::Cycle::get(),
+             "sum of matrix CLoad miss allocation to CPU response schedule "
+             "cycles"),
+    ADD_STAT(matrixCLoadMissReqToCpuRespSchedCyclesMax,
+             statistics::units::Cycle::get(),
+             "max matrix CLoad miss allocation to CPU response schedule "
+             "cycles"),
+    ADD_STAT(matrixCLoadMissCpuRespQueueBacklog,
+             statistics::units::Count::get(),
+             "matrix CLoad miss responses scheduled behind existing CPU "
+             "responses"),
+    ADD_STAT(matrixCLoadMissCpuRespQueueWaitingOnRetry,
+             statistics::units::Count::get(),
+             "matrix CLoad miss CPU responses scheduled while response port "
+             "waits for retry"),
+    ADD_STAT(matrixCLoadMissCpuRespQueueEntries,
+             statistics::units::Count::get(),
+             "sum of queued response entries before matrix CLoad miss CPU "
+             "response"),
+    ADD_STAT(matrixCLoadMissCpuRespQueueEntriesMax,
+             statistics::units::Count::get(),
+             "max queued response entries before matrix CLoad miss CPU "
+             "response"),
+    ADD_STAT(matrixCLoadMissCpuRespQueueDelayCycles,
+             statistics::units::Cycle::get(),
+             "sum of matrix CLoad miss CPU response queue delay cycles"),
+    ADD_STAT(matrixCLoadMissCpuRespQueueDelayCyclesMax,
+             statistics::units::Cycle::get(),
+             "max matrix CLoad miss CPU response queue delay cycles"),
     cmd(MemCmd::NUM_MEM_CMDS)
 {
     for (int idx = 0; idx < MemCmd::NUM_MEM_CMDS; ++idx)
@@ -3250,13 +3711,36 @@ BaseCache::CpuSidePort::tryTiming(PacketPtr pkt)
         || pkt->isStorePFTrain()) {
         // always let express snoop packets through even if blocked
         return true;
-    } else if (blocked || mustSendRetry) {
+    }
+
+    const bool matrix_c_load = cache->isMatrixCLoad(pkt);
+    const bool matrix_c_load_lower_req = cache->isMatrixCLoadLowerReq(pkt);
+    if (matrix_c_load) {
+        ++cache->stats.matrixCLoadTimingReqAttempts;
+    }
+    if (matrix_c_load_lower_req) {
+        ++cache->stats.matrixCLoadLowerTimingReqAttempts;
+    }
+
+    if (blocked || mustSendRetry) {
         // either already committed to send a retry, or blocked
         mustSendRetry = true;
+        if (matrix_c_load) {
+            ++cache->stats.matrixCLoadTimingReqBlockedByPort;
+        }
+        if (matrix_c_load_lower_req) {
+            ++cache->stats.matrixCLoadLowerTimingReqBlockedByPort;
+        }
         return false;
     }
     if (!cache->tryAccessTag(pkt)) {
         DPRINTF(TagReadFail, "tryAccessTag fails addr: %lx\n", pkt->getAddr());
+        if (matrix_c_load) {
+            ++cache->stats.matrixCLoadTimingReqBlockedByTag;
+        }
+        if (matrix_c_load_lower_req) {
+            ++cache->stats.matrixCLoadLowerTimingReqBlockedByTag;
+        }
         return false;
     }
     int sliceidx = cache->getSliceIdx(pkt->getAddr());
@@ -3268,10 +3752,22 @@ BaseCache::CpuSidePort::tryTiming(PacketPtr pkt)
             } else {
                 owner.schedule(sendRetryEvent, cache->nextCycle());
             }
+            if (matrix_c_load) {
+                ++cache->stats.matrixCLoadTimingReqBlockedBySliceBusy;
+            }
+            if (matrix_c_load_lower_req) {
+                ++cache->stats.matrixCLoadLowerTimingReqBlockedBySliceBusy;
+            }
             return false;
         }
     }
     mustSendRetry = false;
+    if (matrix_c_load) {
+        ++cache->stats.matrixCLoadTimingReqAccepted;
+    }
+    if (matrix_c_load_lower_req) {
+        ++cache->stats.matrixCLoadLowerTimingReqAccepted;
+    }
     return true;
 
 }
@@ -3294,6 +3790,18 @@ BaseCache::CpuSidePort::recvTimingReq(PacketPtr pkt)
         cache->recvTimingReq(pkt);
         if (pkt->mshrArbFailed() || pkt->mshrAliasFailed() ||
             pkt->isHitInWriteBuffer()) {
+            const bool matrix_c_load = cache->isMatrixCLoad(pkt);
+            const bool matrix_c_load_lower_req =
+                cache->isMatrixCLoadLowerReq(pkt);
+            if (pkt->mshrArbFailed()) {
+                if (matrix_c_load) {
+                    ++cache->stats.matrixCLoadTimingReqBlockedByMshrArb;
+                }
+                if (matrix_c_load_lower_req) {
+                    ++cache->stats.
+                        matrixCLoadLowerTimingReqBlockedByMshrArb;
+                }
+            }
             // If the MSHR arbitration failed, we need to retry later.
             // We will schedule a retry event to try again.
             if (sendRetryEvent.scheduled()) {

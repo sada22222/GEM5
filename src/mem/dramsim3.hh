@@ -53,6 +53,7 @@
 #include "mem/dramsim3_wrapper.hh"
 #include "mem/qport.hh"
 #include "params/DRAMsim3.hh"
+#include "sim/stats.hh"
 
 namespace gem5
 {
@@ -131,6 +132,9 @@ class DRAMsim3 : public AbstractMemory
     std::unordered_map<Addr, std::queue<PacketPtr> > outstandingReads;
     std::unordered_map<Addr, std::queue<PacketPtr> > outstandingWrites;
 
+    std::unordered_map<PacketPtr, Tick> acceptTick;
+    std::unordered_map<PacketPtr, Tick> callbackTick;
+
     /**
      * Count the number of outstanding transactions so that we can
      * block any further requests until there is space in DRAMsim3 and
@@ -168,6 +172,11 @@ class DRAMsim3 : public AbstractMemory
 
     void sendResponse();
 
+    bool isMatrixCLoadRequest(PacketPtr pkt) const;
+    void recordLatency(statistics::Scalar &total,
+                       statistics::Scalar &maximum,
+                       Tick latency);
+
     /**
      * Event to schedule sending of responses
      */
@@ -188,6 +197,30 @@ class DRAMsim3 : public AbstractMemory
      * hold it for deletion until a subsequent call
      */
     std::unique_ptr<Packet> pendingDelete;
+
+    statistics::Scalar readReqAccepted;
+    statistics::Scalar readReqRejectedRetry;
+    statistics::Scalar readReqRejectedOutstandingFull;
+    statistics::Scalar readReqRejectedWrapper;
+    statistics::Scalar readRespRetry;
+    statistics::Scalar readAcceptToCallbackCycles;
+    statistics::Scalar readAcceptToCallbackCyclesMax;
+    statistics::Scalar readCallbackToRespCycles;
+    statistics::Scalar readCallbackToRespCyclesMax;
+    statistics::Scalar readAcceptToRespCycles;
+    statistics::Scalar readAcceptToRespCyclesMax;
+
+    statistics::Scalar matrixCLoadReadReqAccepted;
+    statistics::Scalar matrixCLoadReadReqRejectedRetry;
+    statistics::Scalar matrixCLoadReadReqRejectedOutstandingFull;
+    statistics::Scalar matrixCLoadReadReqRejectedWrapper;
+    statistics::Scalar matrixCLoadReadRespRetry;
+    statistics::Scalar matrixCLoadReadAcceptToCallbackCycles;
+    statistics::Scalar matrixCLoadReadAcceptToCallbackCyclesMax;
+    statistics::Scalar matrixCLoadReadCallbackToRespCycles;
+    statistics::Scalar matrixCLoadReadCallbackToRespCyclesMax;
+    statistics::Scalar matrixCLoadReadAcceptToRespCycles;
+    statistics::Scalar matrixCLoadReadAcceptToRespCyclesMax;
 
   public:
 

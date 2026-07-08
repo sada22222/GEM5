@@ -38,9 +38,12 @@
 #include "mem/dramsim3.hh"
 
 #include "base/callback.hh"
+#include "base/intmath.hh"
 #include "base/trace.hh"
 #include "debug/DRAMsim3.hh"
 #include "debug/Drain.hh"
+#include "mem/packet.hh"
+#include "mem/request.hh"
 #include "sim/system.hh"
 
 namespace gem5
@@ -60,7 +63,74 @@ DRAMsim3::DRAMsim3(const Params &p) :
     retryReq(false), retryResp(false), startTick(0),
     nbrOutstandingReads(0), nbrOutstandingWrites(0),
     sendResponseEvent([this]{ sendResponse(); }, name()),
-    tickEvent([this]{ tick(); }, name())
+    tickEvent([this]{ tick(); }, name()),
+    ADD_STAT(readReqAccepted, statistics::units::Count::get(),
+             "DRAMsim3 read requests accepted"),
+    ADD_STAT(readReqRejectedRetry, statistics::units::Count::get(),
+             "DRAMsim3 read requests rejected while waiting for request retry"),
+    ADD_STAT(readReqRejectedOutstandingFull,
+             statistics::units::Count::get(),
+             "DRAMsim3 read requests rejected because outstanding slots are "
+             "full"),
+    ADD_STAT(readReqRejectedWrapper, statistics::units::Count::get(),
+             "DRAMsim3 read requests rejected by wrapper canAccept"),
+    ADD_STAT(readRespRetry, statistics::units::Count::get(),
+             "DRAMsim3 read responses rejected by upstream response retry"),
+    ADD_STAT(readAcceptToCallbackCycles, statistics::units::Cycle::get(),
+             "sum of DRAMsim3 read accept to callback cycles"),
+    ADD_STAT(readAcceptToCallbackCyclesMax,
+             statistics::units::Cycle::get(),
+             "max DRAMsim3 read accept to callback cycles"),
+    ADD_STAT(readCallbackToRespCycles, statistics::units::Cycle::get(),
+             "sum of DRAMsim3 read callback to response-send cycles"),
+    ADD_STAT(readCallbackToRespCyclesMax,
+             statistics::units::Cycle::get(),
+             "max DRAMsim3 read callback to response-send cycles"),
+    ADD_STAT(readAcceptToRespCycles, statistics::units::Cycle::get(),
+             "sum of DRAMsim3 read accept to response-send cycles"),
+    ADD_STAT(readAcceptToRespCyclesMax,
+             statistics::units::Cycle::get(),
+             "max DRAMsim3 read accept to response-send cycles"),
+    ADD_STAT(matrixCLoadReadReqAccepted,
+             statistics::units::Count::get(),
+             "DRAMsim3 matrix CLoad read requests accepted"),
+    ADD_STAT(matrixCLoadReadReqRejectedRetry,
+             statistics::units::Count::get(),
+             "DRAMsim3 matrix CLoad read requests rejected while waiting for "
+             "request retry"),
+    ADD_STAT(matrixCLoadReadReqRejectedOutstandingFull,
+             statistics::units::Count::get(),
+             "DRAMsim3 matrix CLoad read requests rejected because "
+             "outstanding slots are full"),
+    ADD_STAT(matrixCLoadReadReqRejectedWrapper,
+             statistics::units::Count::get(),
+             "DRAMsim3 matrix CLoad read requests rejected by wrapper "
+             "canAccept"),
+    ADD_STAT(matrixCLoadReadRespRetry,
+             statistics::units::Count::get(),
+             "DRAMsim3 matrix CLoad read responses rejected by upstream "
+             "response retry"),
+    ADD_STAT(matrixCLoadReadAcceptToCallbackCycles,
+             statistics::units::Cycle::get(),
+             "sum of DRAMsim3 matrix CLoad read accept to callback cycles"),
+    ADD_STAT(matrixCLoadReadAcceptToCallbackCyclesMax,
+             statistics::units::Cycle::get(),
+             "max DRAMsim3 matrix CLoad read accept to callback cycles"),
+    ADD_STAT(matrixCLoadReadCallbackToRespCycles,
+             statistics::units::Cycle::get(),
+             "sum of DRAMsim3 matrix CLoad read callback to response-send "
+             "cycles"),
+    ADD_STAT(matrixCLoadReadCallbackToRespCyclesMax,
+             statistics::units::Cycle::get(),
+             "max DRAMsim3 matrix CLoad read callback to response-send "
+             "cycles"),
+    ADD_STAT(matrixCLoadReadAcceptToRespCycles,
+             statistics::units::Cycle::get(),
+             "sum of DRAMsim3 matrix CLoad read accept to response-send "
+             "cycles"),
+    ADD_STAT(matrixCLoadReadAcceptToRespCyclesMax,
+             statistics::units::Cycle::get(),
+             "max DRAMsim3 matrix CLoad read accept to response-send cycles")
 {
     DPRINTF(DRAMsim3,
             "Instantiated DRAMsim3 with clock %d ns and queue size %d\n",
@@ -113,6 +183,35 @@ DRAMsim3::sendResponse()
     assert(time <= curTick());
     bool success = port.sendTimingResp(pkt);
     if (success) {
+        const bool matrix_c_load = pkt->req != nullptr &&
+            pkt->req->hasXsMetadata() &&
+            pkt->req->getXsMetadata().matrixTask() &&
+            pkt->req->getXsMetadata().matrixModify() &&
+            pkt->isRead();
+        auto accept_it = acceptTick.find(pkt);
+        if (accept_it != acceptTick.end()) {
+            recordLatency(readAcceptToRespCycles,
+                          readAcceptToRespCyclesMax,
+                          curTick() - accept_it->second);
+            if (matrix_c_load) {
+                recordLatency(matrixCLoadReadAcceptToRespCycles,
+                              matrixCLoadReadAcceptToRespCyclesMax,
+                              curTick() - accept_it->second);
+            }
+            acceptTick.erase(accept_it);
+        }
+        auto callback_it = callbackTick.find(pkt);
+        if (callback_it != callbackTick.end()) {
+            recordLatency(readCallbackToRespCycles,
+                          readCallbackToRespCyclesMax,
+                          curTick() - callback_it->second);
+            if (matrix_c_load) {
+                recordLatency(matrixCLoadReadCallbackToRespCycles,
+                              matrixCLoadReadCallbackToRespCyclesMax,
+                              curTick() - callback_it->second);
+            }
+            callbackTick.erase(callback_it);
+        }
         responseQueue.pop();
 
         DPRINTF(DRAMsim3, "Have %d read, %d write, %d responses outstanding\n",
@@ -128,6 +227,14 @@ DRAMsim3::sendResponse()
         if (nbrOutstanding() == 0)
             signalDrainDone();
     } else {
+        if (pkt->isRead()) {
+            ++readRespRetry;
+            if (pkt->req != nullptr && pkt->req->hasXsMetadata() &&
+                pkt->req->getXsMetadata().matrixTask() &&
+                pkt->req->getXsMetadata().matrixModify()) {
+                ++matrixCLoadReadRespRetry;
+            }
+        }
         retryResp = true;
 
         DPRINTF(DRAMsim3, "Waiting for response retry\n");
@@ -140,6 +247,31 @@ unsigned int
 DRAMsim3::nbrOutstanding() const
 {
     return nbrOutstandingReads + nbrOutstandingWrites + responseQueue.size();
+}
+
+bool
+DRAMsim3::isMatrixCLoadRequest(PacketPtr pkt) const
+{
+    if (pkt == nullptr || pkt->req == nullptr || !pkt->isRequest() ||
+        !pkt->isRead() || !pkt->req->hasXsMetadata()) {
+        return false;
+    }
+
+    const auto xs_metadata = pkt->req->getXsMetadata();
+    return xs_metadata.matrixTask() && xs_metadata.matrixModify();
+}
+
+void
+DRAMsim3::recordLatency(statistics::Scalar &total,
+                        statistics::Scalar &maximum,
+                        Tick latency)
+{
+    const uint64_t cycles =
+        divCeil(latency, wrapper.clockPeriod() * sim_clock::as_int::ns);
+    total += cycles;
+    if (cycles > maximum.value()) {
+        maximum = cycles;
+    }
 }
 
 void
@@ -190,6 +322,8 @@ DRAMsim3::recvFunctional(PacketPtr pkt)
 bool
 DRAMsim3::recvTimingReq(PacketPtr pkt)
 {
+    const bool matrix_c_load = isMatrixCLoadRequest(pkt);
+
     // if a cache is responding, sink the packet without further action
     if (pkt->cacheResponding()) {
         pendingDelete.reset(pkt);
@@ -201,6 +335,12 @@ DRAMsim3::recvTimingReq(PacketPtr pkt)
     // simply ignore it for now
     if (retryReq) {
         DPRINTF(DRAMsim3, "Ignoring request while waiting for retry\n");
+        if (pkt->isRead()) {
+            ++readReqRejectedRetry;
+            if (matrix_c_load) {
+                ++matrixCLoadReadReqRejectedRetry;
+            }
+        }
         return false;
     }
 
@@ -222,11 +362,16 @@ DRAMsim3::recvTimingReq(PacketPtr pkt)
     if (pkt->isRead()) {
         if (can_accept) {
             outstandingReads[pkt->getAddr()].push(pkt);
+            acceptTick[pkt] = curTick();
 
             // we count a transaction as outstanding until it has left the
             // queue in the controller, and the response has been sent
             // back, note that this will differ for reads and writes
             ++nbrOutstandingReads;
+            ++readReqAccepted;
+            if (matrix_c_load) {
+                ++matrixCLoadReadReqAccepted;
+            }
         }
     } else if (pkt->isWrite()) {
         if (can_accept) {
@@ -257,6 +402,19 @@ DRAMsim3::recvTimingReq(PacketPtr pkt)
 
         return true;
     } else {
+        if (pkt->isRead()) {
+            if (outstanding_full) {
+                ++readReqRejectedOutstandingFull;
+                if (matrix_c_load) {
+                    ++matrixCLoadReadReqRejectedOutstandingFull;
+                }
+            } else {
+                ++readReqRejectedWrapper;
+                if (matrix_c_load) {
+                    ++matrixCLoadReadReqRejectedWrapper;
+                }
+            }
+        }
         retryReq = true;
         return false;
     }
@@ -305,6 +463,8 @@ DRAMsim3::accessAndRespond(PacketPtr pkt)
             schedule(sendResponseEvent, time);
     } else {
         // queue the packet for deletion
+        acceptTick.erase(pkt);
+        callbackTick.erase(pkt);
         pendingDelete.reset(pkt);
     }
 }
@@ -322,6 +482,22 @@ void DRAMsim3::readComplete(unsigned id, uint64_t addr)
     // the best we can do at this point
     PacketPtr pkt = p->second.front();
     p->second.pop();
+    callbackTick[pkt] = curTick();
+    auto accept_it = acceptTick.find(pkt);
+    if (accept_it != acceptTick.end()) {
+        const bool matrix_c_load = pkt->req != nullptr &&
+            pkt->req->hasXsMetadata() &&
+            pkt->req->getXsMetadata().matrixTask() &&
+            pkt->req->getXsMetadata().matrixModify();
+        recordLatency(readAcceptToCallbackCycles,
+                      readAcceptToCallbackCyclesMax,
+                      curTick() - accept_it->second);
+        if (matrix_c_load) {
+            recordLatency(matrixCLoadReadAcceptToCallbackCycles,
+                          matrixCLoadReadAcceptToCallbackCyclesMax,
+                          curTick() - accept_it->second);
+        }
+    }
 
     if (p->second.empty())
         outstandingReads.erase(p);

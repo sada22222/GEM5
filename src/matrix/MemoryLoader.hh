@@ -298,6 +298,19 @@ scatterTimingLoadResponse(const TimingLoadPlan &plan,
     return true;
 }
 
+enum class MatrixL2Key : uint8_t
+{
+    None = 0,
+    Matrix = 0x1,
+    MatrixModify = 0x3
+};
+
+inline uint8_t
+matrixL2KeyBits(MatrixL2Key key)
+{
+    return static_cast<uint8_t>(key) & 0x3;
+}
+
 class MatrixTimingMemoryAdapter
 {
   public:
@@ -310,13 +323,13 @@ class MatrixTimingMemoryAdapter
         ContextID contextId = InvalidContextID;
         std::array<uint8_t, 64> data = {};
         uint64_t byteMask = 0;
+        uint8_t matrixKey = matrixL2KeyBits(MatrixL2Key::None);
     };
 
     virtual ~MatrixTimingMemoryAdapter() = default;
 
     virtual bool connected() const = 0;
     virtual bool sendTimingRequest(const Request &request) = 0;
-    virtual void sendFunctionalStore(const Request &request) = 0;
 };
 
 } // namespace matrix

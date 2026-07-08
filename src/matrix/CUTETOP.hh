@@ -239,8 +239,6 @@ class DetailedCuteBackend : public MatrixBackend
     void initializeTimingStoreBuffer(TaskSlot &task);
     bool recordTimingLoadResponse(
         TaskSlot &task, const LocalMmuModel::Response &response);
-    bool sendFunctionalStoreBeat(
-        TaskSlot &task, const LocalMmuModel::Response &response);
     bool buildTensorFromTimingLoadData(TaskSlot &task);
     LocalMmuModel::Client localMmuClient(const TaskSlot &task) const;
     void releaseLocalMmuSource(const LocalMmuModel::Response &response);

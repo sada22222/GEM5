@@ -383,35 +383,53 @@ class Request
         o3::XsDynInstMetaPtr instXsMetadata;
         PrefetchSourceType prefetchSource;
         int prefetchDepth;
+        uint8_t matrixKey;
 
         XsMetadata() :
             validXsMetadata(false),
             instXsMetadata(nullptr),
             prefetchSource(PF_NONE),
-            prefetchDepth(0) {}
+            prefetchDepth(0),
+            matrixKey(0) {}
 
         XsMetadata(o3::XsDynInstMetaPtr instMeta) :
             validXsMetadata(true),
             instXsMetadata(instMeta),
             prefetchSource(PF_NONE) ,
-            prefetchDepth(0) {}
+            prefetchDepth(0),
+            matrixKey(0) {}
 
         XsMetadata(PrefetchSourceType pfSource) :
             validXsMetadata(true),
             instXsMetadata(nullptr),
             prefetchSource(pfSource) ,
-            prefetchDepth(0) {}
+            prefetchDepth(0),
+            matrixKey(0) {}
 
         XsMetadata(PrefetchSourceType pfSource,int pfDepth) :
             validXsMetadata(true),
             instXsMetadata(nullptr),
             prefetchSource(pfSource) ,
-            prefetchDepth(pfDepth) {}
+            prefetchDepth(pfDepth),
+            matrixKey(0) {}
 
         void invalidate() {
             validXsMetadata = false;
             instXsMetadata = nullptr;
             prefetchSource = PF_NONE;
+            matrixKey = 0;
+        }
+
+        bool hasMatrixKey() const {
+            return (matrixKey & 0x3) != 0;
+        }
+
+        bool matrixTask() const {
+            return (matrixKey & 0x1) != 0;
+        }
+
+        bool matrixModify() const {
+            return (matrixKey & 0x2) != 0;
         }
     } XsMetadata;
 

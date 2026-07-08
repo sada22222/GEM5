@@ -123,6 +123,12 @@ byteEnableFromMask(uint64_t byte_mask, uint32_t packet_size)
     return byte_enable;
 }
 
+Addr
+matrixLineAddr(Addr addr)
+{
+    return addr & ~(Addr(matrix::timing_load_detail::CacheLineBytes) - 1);
+}
+
 } // anonymous namespace
 #endif
 
@@ -130,24 +136,6 @@ byteEnableFromMask(uint64_t byte_mask, uint32_t packet_size)
 CPU::MatrixMemPort::MatrixMemPort(const std::string &name, CPU *cpu_)
     : RequestPort(name, cpu_), cpu(cpu_)
 {
-}
-
-void
-CPU::MatrixMemPort::sendFunctionalStore(const Request &request)
-{
-    auto req = std::make_shared<gem5::Request>(
-        request.paddr, request.packetSize, gem5::Request::PHYSICAL,
-        cpu->dataRequestorId());
-    req->taskId(cpu->taskId());
-    if (request.contextId != InvalidContextID) {
-        req->setContext(request.contextId);
-    }
-    req->setByteEnable(
-        byteEnableFromMask(request.byteMask, request.packetSize));
-
-    Packet pkt(req, MemCmd::WriteReq);
-    pkt.dataStaticConst(request.data.data());
-    sendFunctional(&pkt);
 }
 
 PacketPtr
@@ -162,18 +150,26 @@ CPU::MatrixMemPort::buildTimingPacket(const Request &request)
     if (request.contextId != InvalidContextID) {
         req->setContext(request.contextId);
     }
+    if (request.matrixKey != 0) {
+        gem5::Request::XsMetadata xs_metadata;
+        xs_metadata.validXsMetadata = true;
+        xs_metadata.matrixKey = request.matrixKey & 0x3;
+        req->setXsMetadata(xs_metadata);
+    }
 
-    auto *pkt = Packet::createRead(req);
+    const bool matrix_modify = (request.matrixKey & 0x2) != 0;
+    auto *pkt = matrix_modify ?
+        new Packet(req, MemCmd::ReadExReq) : Packet::createRead(req);
     auto *data = new uint8_t[request.packetSize];
     std::memset(data, 0, request.packetSize);
     pkt->dataDynamic(data);
     pkt->senderState = new SenderState(
-        request.sourceId, false, request.byteMask);
+        request.sourceId, SenderState::Phase::Load, request.byteMask);
     return pkt;
 }
 
 PacketPtr
-CPU::MatrixMemPort::buildStoreInvalidatePacket(const Request &request)
+CPU::MatrixMemPort::buildStoreCleanInvalidPacket(const Request &request)
 {
     auto req = std::make_shared<gem5::Request>(
         request.paddr, request.packetSize,
@@ -186,8 +182,45 @@ CPU::MatrixMemPort::buildStoreInvalidatePacket(const Request &request)
     }
 
     auto *pkt = Packet::createWrite(req);
+    auto *state = new SenderState(
+        request.sourceId, SenderState::Phase::StoreCleanInvalid,
+        request.byteMask);
+    state->paddr = request.paddr;
+    state->packetSize = request.packetSize;
+    state->contextId = request.contextId;
+    state->matrixKey = request.matrixKey;
+    state->storeData = request.data;
+    pkt->senderState = state;
+    return pkt;
+}
+
+PacketPtr
+CPU::MatrixMemPort::buildStoreTimingPacket(const Request &request)
+{
+    auto req = std::make_shared<gem5::Request>(
+        request.paddr, request.packetSize, gem5::Request::PHYSICAL,
+        cpu->dataRequestorId());
+    req->taskId(cpu->taskId());
+    if (request.contextId != InvalidContextID) {
+        req->setContext(request.contextId);
+    }
+    if (request.matrixKey != 0) {
+        gem5::Request::XsMetadata xs_metadata;
+        xs_metadata.validXsMetadata = true;
+        xs_metadata.matrixKey = request.matrixKey & 0x3;
+        req->setXsMetadata(xs_metadata);
+    }
+    assert(request.packetSize <= request.data.size());
+    req->setByteEnable(
+        byteEnableFromMask(request.byteMask, request.packetSize));
+
+    auto *pkt = new Packet(req, MemCmd::WriteReq);
+    auto *data = new uint8_t[request.packetSize];
+    std::memcpy(data, request.data.data(), request.packetSize);
+    pkt->dataDynamic(data);
     pkt->senderState = new SenderState(
-        request.sourceId, true, request.byteMask, true);
+        request.sourceId, SenderState::Phase::StoreWrite,
+        request.byteMask);
     return pkt;
 }
 
@@ -208,7 +241,7 @@ CPU::MatrixMemPort::sendOrBlock(PacketPtr pkt)
                 "matrix_mem_port_send source=%u store=%u paddr=%#llx "
                 "size=%u mask=%#llx.\n",
                 state ? state->sourceId : 0,
-                state && state->isStore ? 1 : 0,
+                state && state->isStore() ? 1 : 0,
                 pkt->getAddr(), pkt->getSize(),
                 state ? static_cast<unsigned long long>(state->byteMask) : 0);
     }
@@ -217,8 +250,13 @@ CPU::MatrixMemPort::sendOrBlock(PacketPtr pkt)
 bool
 CPU::MatrixMemPort::sendTimingRequest(const Request &request)
 {
+    const bool rmw_store =
+        request.isStore &&
+        matrixRmwStoreLines.count(matrixLineAddr(request.paddr)) != 0;
     auto *pkt = request.isStore ?
-        buildStoreInvalidatePacket(request) : buildTimingPacket(request);
+        (rmw_store ? buildStoreTimingPacket(request) :
+         buildStoreCleanInvalidPacket(request)) :
+        buildTimingPacket(request);
     sendOrBlock(pkt);
     return true;
 }
@@ -231,7 +269,33 @@ CPU::MatrixMemPort::recvTimingResp(PacketPtr pkt)
              "Matrix memory response missing sender state");
 
     const uint32_t source_id = state->sourceId;
-    const bool store_invalidate_done = state->awaitingStoreInvalidate;
+    if (state->isStoreCleanInvalid()) {
+        Request store_request;
+        store_request.isStore = true;
+        store_request.paddr = state->paddr;
+        store_request.packetSize = state->packetSize;
+        store_request.sourceId = state->sourceId;
+        store_request.contextId = state->contextId;
+        store_request.data = state->storeData;
+        store_request.byteMask = state->byteMask;
+        store_request.matrixKey = state->matrixKey;
+
+        delete pkt->senderState;
+        pkt->senderState = nullptr;
+        delete pkt;
+
+        sendOrBlock(buildStoreTimingPacket(store_request));
+        cpu->activityRec.activity();
+        cpu->scheduleTickEvent(Cycles(0));
+        DPRINTF(MatrixCuteTrace,
+                "matrix_mem_port_store_clean_invalid_resp source=%u.\n",
+                source_id);
+        return true;
+    }
+
+    const bool store_ack_done = state->awaitingStoreAck();
+    const Addr pkt_addr = pkt->getAddr();
+    const MemCmd pkt_cmd = pkt->cmd;
     const bool has_data = pkt->hasData() && pkt->getSize() != 0;
     const uint32_t data_size = has_data ? pkt->getSize() : 0;
     std::vector<uint8_t> data;
@@ -244,7 +308,8 @@ CPU::MatrixMemPort::recvTimingResp(PacketPtr pkt)
     pkt->senderState = nullptr;
     delete pkt;
 
-    if (store_invalidate_done) {
+    if (store_ack_done) {
+        matrixRmwStoreLines.erase(matrixLineAddr(pkt_addr));
         const bool completed =
             cpu->matrixBackend &&
             cpu->matrixBackend->completeTimingMemoryResponse(source_id);
@@ -253,9 +318,13 @@ CPU::MatrixMemPort::recvTimingResp(PacketPtr pkt)
         cpu->activityRec.activity();
         cpu->scheduleTickEvent(Cycles(0));
         DPRINTF(MatrixCuteTrace,
-                "matrix_mem_port_store_clean_ack source=%u.\n",
+                "matrix_mem_port_store_ack source=%u.\n",
                 source_id);
         return true;
+    }
+
+    if (pkt_cmd == MemCmd::ReadExResp) {
+        matrixRmwStoreLines.insert(matrixLineAddr(pkt_addr));
     }
 
     const bool completed =

@@ -43,6 +43,7 @@
 #ifndef __CPU_O3_CPU_HH__
 #define __CPU_O3_CPU_HH__
 
+#include <array>
 #include <deque>
 #include <iostream>
 #include <list>
@@ -51,6 +52,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "arch/generic/pcstate.hh"
@@ -166,7 +168,6 @@ class CPU : public BaseCPU
 
         bool connected() const override { return isConnected(); }
         bool sendTimingRequest(const Request &request) override;
-        void sendFunctionalStore(const Request &request) override;
 
       protected:
         bool recvTimingResp(PacketPtr pkt) override;
@@ -175,28 +176,49 @@ class CPU : public BaseCPU
       private:
         struct SenderState : public Packet::SenderState
         {
-            SenderState(uint32_t source_id, bool is_store,
-                        uint64_t byte_mask,
-                        bool awaiting_store_invalidate=false)
-                : sourceId(source_id), isStore(is_store),
-                  byteMask(byte_mask),
-                  awaitingStoreInvalidate(awaiting_store_invalidate)
+            enum class Phase
+            {
+                Load,
+                StoreCleanInvalid,
+                StoreWrite
+            };
+
+            SenderState(uint32_t source_id, Phase phase_,
+                        uint64_t byte_mask)
+                : sourceId(source_id), phase(phase_), byteMask(byte_mask)
             {
             }
 
+            bool isStore() const { return phase != Phase::Load; }
+            bool isStoreCleanInvalid() const
+            {
+                return phase == Phase::StoreCleanInvalid;
+            }
+            bool awaitingStoreAck() const
+            {
+                return phase == Phase::StoreWrite;
+            }
+
             uint32_t sourceId = 0;
-            bool isStore = false;
+            Phase phase = Phase::Load;
             uint64_t byteMask = 0;
-            bool awaitingStoreInvalidate = false;
+            Addr paddr = 0;
+            uint32_t packetSize = 0;
+            ContextID contextId = InvalidContextID;
+            uint8_t matrixKey = matrix::matrixL2KeyBits(
+                matrix::MatrixL2Key::None);
+            std::array<uint8_t, 64> storeData = {};
         };
 
         PacketPtr buildTimingPacket(const Request &request);
-        PacketPtr buildStoreInvalidatePacket(const Request &request);
+        PacketPtr buildStoreCleanInvalidPacket(const Request &request);
+        PacketPtr buildStoreTimingPacket(const Request &request);
         void sendOrBlock(PacketPtr pkt);
         void trySendBlocked();
 
         CPU *cpu = nullptr;
         std::deque<PacketPtr> blockedPackets;
+        std::unordered_set<Addr> matrixRmwStoreLines;
     };
 
     MatrixMemPort matrixMemPort;

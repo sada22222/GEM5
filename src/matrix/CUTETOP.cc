@@ -340,34 +340,6 @@ DetailedCuteBackend::recordTimingLoadResponse(
 }
 
 bool
-DetailedCuteBackend::sendFunctionalStoreBeat(
-    TaskSlot &task, const LocalMmuModel::Response &response)
-{
-    assert(task.entry.isStore);
-    if (!useTimingMemory()) {
-        return false;
-    }
-
-    initializeTimingStoreBuffer(task);
-    if (response.beatIndex >= task.lsuStorePlan.beats.size()) {
-        return false;
-    }
-
-    const auto &beat = task.lsuStorePlan.beats[response.beatIndex];
-    MatrixTimingMemoryAdapter::Request request;
-    request.isStore = true;
-    request.sourceId = response.sourceId;
-    request.paddr = beat.paddr;
-    request.packetSize = beat.packetSize;
-    request.contextId = task.entry.request.lsu.tc ?
-        task.entry.request.lsu.tc->contextId() : InvalidContextID;
-    request.data = beat.lineData;
-    request.byteMask = beat.byteMask;
-    timingMemory->sendFunctionalStore(request);
-    return true;
-}
-
-bool
 DetailedCuteBackend::buildTensorFromTimingLoadData(TaskSlot &task)
 {
     assert(task.entry.isLoad);
@@ -502,6 +474,7 @@ DetailedCuteBackend::issueLocalMmuTimingRequest()
     MatrixTimingMemoryAdapter::Request request;
     request.isStore = issued.request.isStore;
     request.sourceId = issued.sourceId;
+    request.matrixKey = matrixL2KeyBits(MatrixL2Key::None);
 
     auto attach_address = [&](std::optional<TaskSlot> &slot) {
         if (!slot.has_value()) {
@@ -514,6 +487,10 @@ DetailedCuteBackend::issueLocalMmuTimingRequest()
         }
 
         const auto &desc = task.entry.request.lsu;
+        const bool is_matrix_c_read = task.entry.isLoad && desc.isAcc;
+        request.matrixKey = matrixL2KeyBits(
+            is_matrix_c_read ? MatrixL2Key::MatrixModify :
+            MatrixL2Key::Matrix);
         if (task.entry.isLoad) {
             initializeTimingLoadBuffer(task);
             if (issued.request.beatIndex >=
@@ -534,6 +511,7 @@ DetailedCuteBackend::issueLocalMmuTimingRequest()
                 task.lsuStorePlan.beats[issued.request.beatIndex];
             request.paddr = beat.paddr;
             request.packetSize = beat.packetSize;
+            request.data = beat.lineData;
             request.byteMask = beat.byteMask;
         }
         if (desc.tc) {
@@ -1473,11 +1451,6 @@ DetailedCuteBackend::LocalMmuResponseResult
 DetailedCuteBackend::finishLocalMmuStoreAck(
     TaskSlot &task, const LocalMmuModel::Response &response)
 {
-    if (!sendFunctionalStoreBeat(task, response)) {
-        task.bufferedCompletion = makeCompletion(
-            task.entry.request.seq, CuteRequestKind::Lsu,
-            CuteCompletionStatus::Unsupported);
-    }
     ++task.lsuResponsesReceived;
     releaseLocalMmuSource(response);
     traceLocalMmuResponse(task, response);

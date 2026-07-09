@@ -122,6 +122,26 @@ class CPU : public BaseCPU
 
     friend class ThreadContext;
 
+    enum class MatrixInstTimingKind : uint8_t
+    {
+        ALoad,
+        BLoad,
+        CLoad,
+        StoreC,
+        Mma,
+        NumKinds
+    };
+
+    struct MatrixInstTiming
+    {
+        bool valid = false;
+        MatrixInstTimingKind kind = MatrixInstTimingKind::NumKinds;
+        Tick fetchTick = MaxTick;
+        Tick amuCommitTick = MaxTick;
+        Tick amuIssueTick = MaxTick;
+        Tick cuteIssueTick = MaxTick;
+    };
+
   public:
     gem5::prefetch::Base *hintDownStream{nullptr};
     void addHintDownStream(gem5::prefetch::Base* down_stream)
@@ -440,7 +460,9 @@ class CPU : public BaseCPU
     bool canAcceptMatrixBackendReq(const matrix::CuteRequest &req,
                                    InstSeqNum seq_num);
     bool submitMatrixBackendReq(ThreadID tid, const matrix::CuteRequest &req,
-                                InstSeqNum seq_num);
+                                InstSeqNum seq_num,
+                                const MatrixInstTiming *timing = nullptr);
+    void noteMatrixBackendCuteIssue(InstSeqNum seq_num);
     void serviceMatrixBackend();
     void consumeMatrixAmuProxy(ThreadID tid,
         const o3::MatrixAmuBuffer::Entry &entry);
@@ -733,6 +755,9 @@ class CPU : public BaseCPU
     bool enableMatrixMlsQueue = false;
 #endif
     std::unordered_map<InstSeqNum, ThreadID> matrixBackendOwners;
+#if THE_ISA_IS_RISCV
+    std::unordered_map<InstSeqNum, MatrixInstTiming> matrixBackendTimings;
+#endif
 
     /** CPU pushRequest function, forwards request to LSQ. */
     Fault
@@ -848,6 +873,134 @@ class CPU : public BaseCPU
         //number of misc
         statistics::Scalar miscRegfileReads;
         statistics::Scalar miscRegfileWrites;
+        statistics::Scalar matrixInstFetchToCuteFinishSamples;
+        statistics::Scalar matrixInstFetchToCuteFinishSamplesALoad;
+        statistics::Scalar matrixInstFetchToCuteFinishCyclesALoad;
+        statistics::Scalar matrixInstFetchToCuteFinishCyclesALoadMax;
+        statistics::Scalar matrixInstFetchToCuteFinishSamplesBLoad;
+        statistics::Scalar matrixInstFetchToCuteFinishCyclesBLoad;
+        statistics::Scalar matrixInstFetchToCuteFinishCyclesBLoadMax;
+        statistics::Scalar matrixInstFetchToCuteFinishSamplesCLoad;
+        statistics::Scalar matrixInstFetchToCuteFinishCyclesCLoad;
+        statistics::Scalar matrixInstFetchToCuteFinishCyclesCLoadMax;
+        statistics::Scalar matrixInstFetchToCuteFinishSamplesStoreC;
+        statistics::Scalar matrixInstFetchToCuteFinishCyclesStoreC;
+        statistics::Scalar matrixInstFetchToCuteFinishCyclesStoreCMax;
+        statistics::Scalar matrixInstFetchToCuteFinishSamplesMma;
+        statistics::Scalar matrixInstFetchToCuteFinishCyclesMma;
+        statistics::Scalar matrixInstFetchToCuteFinishCyclesMmaMax;
+        statistics::Scalar matrixInstFetchToAmuCommitSamples;
+        statistics::Scalar matrixInstFetchToAmuCommitSamplesALoad;
+        statistics::Scalar matrixInstFetchToAmuCommitCyclesALoad;
+        statistics::Scalar matrixInstFetchToAmuCommitCyclesALoadMax;
+        statistics::Scalar matrixInstFetchToAmuCommitSamplesBLoad;
+        statistics::Scalar matrixInstFetchToAmuCommitCyclesBLoad;
+        statistics::Scalar matrixInstFetchToAmuCommitCyclesBLoadMax;
+        statistics::Scalar matrixInstFetchToAmuCommitSamplesCLoad;
+        statistics::Scalar matrixInstFetchToAmuCommitCyclesCLoad;
+        statistics::Scalar matrixInstFetchToAmuCommitCyclesCLoadMax;
+        statistics::Scalar matrixInstFetchToAmuCommitSamplesStoreC;
+        statistics::Scalar matrixInstFetchToAmuCommitCyclesStoreC;
+        statistics::Scalar matrixInstFetchToAmuCommitCyclesStoreCMax;
+        statistics::Scalar matrixInstFetchToAmuCommitSamplesMma;
+        statistics::Scalar matrixInstFetchToAmuCommitCyclesMma;
+        statistics::Scalar matrixInstFetchToAmuCommitCyclesMmaMax;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishSamples;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishSamplesALoad;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishCyclesALoad;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishCyclesALoadMax;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishSamplesBLoad;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishCyclesBLoad;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishCyclesBLoadMax;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishSamplesCLoad;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishCyclesCLoad;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishCyclesCLoadMax;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishSamplesStoreC;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishCyclesStoreC;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishCyclesStoreCMax;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishSamplesMma;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishCyclesMma;
+        statistics::Scalar matrixInstAmuIssueToCuteFinishCyclesMmaMax;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueSamples;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueSamplesALoad;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueCyclesALoad;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueCyclesALoadMax;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueSamplesBLoad;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueCyclesBLoad;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueCyclesBLoadMax;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueSamplesCLoad;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueCyclesCLoad;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueCyclesCLoadMax;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueSamplesStoreC;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueCyclesStoreC;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueCyclesStoreCMax;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueSamplesMma;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueCyclesMma;
+        statistics::Scalar matrixInstAmuIssueToCuteIssueCyclesMmaMax;
+        statistics::Scalar matrixAmuBufferEnqToCommitSamples;
+        statistics::Scalar matrixAmuBufferEnqToCommitSamplesALoad;
+        statistics::Scalar matrixAmuBufferEnqToCommitCyclesALoad;
+        statistics::Scalar matrixAmuBufferEnqToCommitCyclesALoadMax;
+        statistics::Scalar matrixAmuBufferEnqToCommitSamplesBLoad;
+        statistics::Scalar matrixAmuBufferEnqToCommitCyclesBLoad;
+        statistics::Scalar matrixAmuBufferEnqToCommitCyclesBLoadMax;
+        statistics::Scalar matrixAmuBufferEnqToCommitSamplesCLoad;
+        statistics::Scalar matrixAmuBufferEnqToCommitCyclesCLoad;
+        statistics::Scalar matrixAmuBufferEnqToCommitCyclesCLoadMax;
+        statistics::Scalar matrixAmuBufferEnqToCommitSamplesStoreC;
+        statistics::Scalar matrixAmuBufferEnqToCommitCyclesStoreC;
+        statistics::Scalar matrixAmuBufferEnqToCommitCyclesStoreCMax;
+        statistics::Scalar matrixAmuBufferEnqToCommitSamplesMma;
+        statistics::Scalar matrixAmuBufferEnqToCommitCyclesMma;
+        statistics::Scalar matrixAmuBufferEnqToCommitCyclesMmaMax;
+        statistics::Scalar matrixAmuBufferCommitToFireSamples;
+        statistics::Scalar matrixAmuBufferCommitToFireSamplesALoad;
+        statistics::Scalar matrixAmuBufferCommitToFireCyclesALoad;
+        statistics::Scalar matrixAmuBufferCommitToFireCyclesALoadMax;
+        statistics::Scalar matrixAmuBufferCommitToFireSamplesBLoad;
+        statistics::Scalar matrixAmuBufferCommitToFireCyclesBLoad;
+        statistics::Scalar matrixAmuBufferCommitToFireCyclesBLoadMax;
+        statistics::Scalar matrixAmuBufferCommitToFireSamplesCLoad;
+        statistics::Scalar matrixAmuBufferCommitToFireCyclesCLoad;
+        statistics::Scalar matrixAmuBufferCommitToFireCyclesCLoadMax;
+        statistics::Scalar matrixAmuBufferCommitToFireSamplesStoreC;
+        statistics::Scalar matrixAmuBufferCommitToFireCyclesStoreC;
+        statistics::Scalar matrixAmuBufferCommitToFireCyclesStoreCMax;
+        statistics::Scalar matrixAmuBufferCommitToFireSamplesMma;
+        statistics::Scalar matrixAmuBufferCommitToFireCyclesMma;
+        statistics::Scalar matrixAmuBufferCommitToFireCyclesMmaMax;
+        statistics::Scalar matrixAmuBufferWritebackToFireSamples;
+        statistics::Scalar matrixAmuBufferWritebackToFireSamplesALoad;
+        statistics::Scalar matrixAmuBufferWritebackToFireCyclesALoad;
+        statistics::Scalar matrixAmuBufferWritebackToFireCyclesALoadMax;
+        statistics::Scalar matrixAmuBufferWritebackToFireSamplesBLoad;
+        statistics::Scalar matrixAmuBufferWritebackToFireCyclesBLoad;
+        statistics::Scalar matrixAmuBufferWritebackToFireCyclesBLoadMax;
+        statistics::Scalar matrixAmuBufferWritebackToFireSamplesCLoad;
+        statistics::Scalar matrixAmuBufferWritebackToFireCyclesCLoad;
+        statistics::Scalar matrixAmuBufferWritebackToFireCyclesCLoadMax;
+        statistics::Scalar matrixAmuBufferWritebackToFireSamplesStoreC;
+        statistics::Scalar matrixAmuBufferWritebackToFireCyclesStoreC;
+        statistics::Scalar matrixAmuBufferWritebackToFireCyclesStoreCMax;
+        statistics::Scalar matrixAmuBufferWritebackToFireSamplesMma;
+        statistics::Scalar matrixAmuBufferWritebackToFireCyclesMma;
+        statistics::Scalar matrixAmuBufferWritebackToFireCyclesMmaMax;
+        statistics::Scalar matrixAmuBufferEnqToFireSamples;
+        statistics::Scalar matrixAmuBufferEnqToFireSamplesALoad;
+        statistics::Scalar matrixAmuBufferEnqToFireCyclesALoad;
+        statistics::Scalar matrixAmuBufferEnqToFireCyclesALoadMax;
+        statistics::Scalar matrixAmuBufferEnqToFireSamplesBLoad;
+        statistics::Scalar matrixAmuBufferEnqToFireCyclesBLoad;
+        statistics::Scalar matrixAmuBufferEnqToFireCyclesBLoadMax;
+        statistics::Scalar matrixAmuBufferEnqToFireSamplesCLoad;
+        statistics::Scalar matrixAmuBufferEnqToFireCyclesCLoad;
+        statistics::Scalar matrixAmuBufferEnqToFireCyclesCLoadMax;
+        statistics::Scalar matrixAmuBufferEnqToFireSamplesStoreC;
+        statistics::Scalar matrixAmuBufferEnqToFireCyclesStoreC;
+        statistics::Scalar matrixAmuBufferEnqToFireCyclesStoreCMax;
+        statistics::Scalar matrixAmuBufferEnqToFireSamplesMma;
+        statistics::Scalar matrixAmuBufferEnqToFireCyclesMma;
+        statistics::Scalar matrixAmuBufferEnqToFireCyclesMmaMax;
         statistics::Scalar lastCommitTick;
     } cpuStats;
 

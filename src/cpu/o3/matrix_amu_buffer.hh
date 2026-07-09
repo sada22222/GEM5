@@ -54,6 +54,10 @@ class MatrixAmuBuffer
         bool committed = false;
         bool canDeq = false;
         InstSeqNum seqNum = 0;
+        Tick allocTick = MaxTick;
+        Tick fetchTick = MaxTick;
+        Tick writebackTick = MaxTick;
+        Tick commitTick = MaxTick;
         matrix::CuteRequest backendReq = {};
         bool backendReqValid = false;
 
@@ -73,12 +77,15 @@ class MatrixAmuBuffer
     const Entry *find(InstSeqNum seq_num) const;
 
     void allocate(ThreadID tid, InstSeqNum seq_num, bool need_amu,
+                  Tick alloc_tick,
+                  Tick fetch_tick,
                   const char *class_name, const char *route_name);
     void noteWriteback(ThreadID tid, InstSeqNum seq_num, bool faulted,
+                       Tick writeback_tick,
                        bool req_valid,
                        const matrix::CuteRequest &backend_req,
                        const char *payload_kind_name);
-    void noteCommit(ThreadID tid, InstSeqNum seq_num);
+    void noteCommit(ThreadID tid, InstSeqNum seq_num, Tick commit_tick);
     bool peekReady(ThreadID tid, Entry &entry_out);
     bool popReady(ThreadID tid, Entry &entry_out);
     void squash(ThreadID tid, InstSeqNum seq_num);

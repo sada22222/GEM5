@@ -311,7 +311,8 @@ ROB::insertMatrixAmuEntry(const DynInstPtr &inst)
     }
 
     matrixAmuBuffers[inst->threadNumber].allocate(
-        inst->threadNumber, inst->seqNum, true,
+        inst->threadNumber, inst->seqNum, true, curTick(),
+        inst->matrixFetchTime(),
         inst->matrixInstClassName(), inst->matrixRouteName());
 }
 
@@ -329,6 +330,7 @@ ROB::noteMatrixAmuWriteback(const DynInstPtr &inst)
 
     matrixAmuBuffers[inst->threadNumber].noteWriteback(
         inst->threadNumber, inst->seqNum, inst->getFault() != NoFault,
+        curTick(),
         backend_req_valid,
         backend_req,
         inst->isMatrixInst() ? inst->matrixPayloadKindName() : "none");
@@ -342,7 +344,7 @@ ROB::noteMatrixAmuCommit(const DynInstPtr &inst)
     }
 
     matrixAmuBuffers[inst->threadNumber].noteCommit(
-        inst->threadNumber, inst->seqNum);
+        inst->threadNumber, inst->seqNum, curTick());
 }
 
 bool

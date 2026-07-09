@@ -42,15 +42,17 @@ namespace matrix
 
 // Active request issue path: fifo, headReady, issueHead, dispatchTask.
 DetailedCuteBackend::DetailedCuteBackend(
-    size_t fifo_depth, size_t ab_reg_count, size_t c_reg_count)
+    size_t fifo_depth, size_t ab_reg_count, size_t c_reg_count,
+    statistics::Group *stats_parent)
     : DetailedCuteBackend(
-          fifo_depth, ab_reg_count, c_reg_count, TimingConfig())
+          fifo_depth, ab_reg_count, c_reg_count, TimingConfig(),
+          stats_parent)
 {
 }
 
 DetailedCuteBackend::DetailedCuteBackend(
     size_t fifo_depth, size_t ab_reg_count, size_t c_reg_count,
-    TimingConfig timing_config)
+    TimingConfig timing_config, statistics::Group *stats_parent)
     : fifo(fifo_depth), regFile(ab_reg_count, c_reg_count),
       scoreboard(ab_reg_count, c_reg_count),
       timingConfig(timing_config),
@@ -59,7 +61,8 @@ DetailedCuteBackend::DetailedCuteBackend(
           timing_config.localMmuMaxOutstanding}),
       matrixL2FillTable(MatrixL2FillTable::Config{
           timing_config.matrixL2FillTableEntries,
-          timing_config.matrixL2FillBankFifoDepth})
+          timing_config.matrixL2FillBankFifoDepth}),
+      cutePhaseStats(stats_parent)
 {
 }
 
@@ -169,6 +172,10 @@ DetailedCuteBackend::headReady(const DecodedFifoEntry &entry,
 void
 DetailedCuteBackend::issueHead(const DecodedFifoEntry &entry)
 {
+    recordCutePhaseIssue(entry);
+    if (issueCallback) {
+        issueCallback(entry.request.seq);
+    }
     scoreboard.onIssue(entry);
     if (entry.isStore) {
         ++pendingStoreCount;

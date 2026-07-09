@@ -127,6 +127,8 @@ MatrixAmuBuffer::findReadyToFire()
 
 void
 MatrixAmuBuffer::allocate(ThreadID tid, InstSeqNum seq_num, bool need_amu,
+                          Tick alloc_tick,
+                          Tick fetch_tick,
                           const char *class_name, const char *route_name)
 {
     panic_if(capacity_ == 0,
@@ -142,6 +144,8 @@ MatrixAmuBuffer::allocate(ThreadID tid, InstSeqNum seq_num, bool need_amu,
     entry.valid = true;
     entry.needAMU = need_amu;
     entry.seqNum = seq_num;
+    entry.allocTick = alloc_tick;
+    entry.fetchTick = fetch_tick;
     DPRINTF(ROB,
             "[tid:%i] Matrix AMU entry alloc [sn:%llu] class=%s route=%s.\n",
             tid, seq_num, class_name, route_name);
@@ -149,6 +153,7 @@ MatrixAmuBuffer::allocate(ThreadID tid, InstSeqNum seq_num, bool need_amu,
 
 void
 MatrixAmuBuffer::noteWriteback(ThreadID tid, InstSeqNum seq_num, bool faulted,
+                               Tick writeback_tick,
                                bool req_valid,
                                const matrix::CuteRequest &backend_req,
                                const char *payload_kind_name)
@@ -158,12 +163,14 @@ MatrixAmuBuffer::noteWriteback(ThreadID tid, InstSeqNum seq_num, bool faulted,
              tid, seq_num);
 
     if (!entry->needAMU) {
+        entry->writebackTick = writeback_tick;
         entry->writebacked = true;
         return;
     }
 
     if (faulted || !req_valid) {
         entry->needAMU = false;
+        entry->writebackTick = writeback_tick;
         entry->writebacked = true;
         DPRINTF(ROB,
                 "[tid:%i] Matrix AMU entry writeback suppressed [sn:%llu] "
@@ -174,6 +181,7 @@ MatrixAmuBuffer::noteWriteback(ThreadID tid, InstSeqNum seq_num, bool faulted,
 
     entry->backendReq = backend_req;
     entry->backendReqValid = true;
+    entry->writebackTick = writeback_tick;
     entry->writebacked = true;
     DPRINTF(ROB,
             "[tid:%i] Matrix AMU entry writeback [sn:%llu] payload=%s.\n",
@@ -181,12 +189,14 @@ MatrixAmuBuffer::noteWriteback(ThreadID tid, InstSeqNum seq_num, bool faulted,
 }
 
 void
-MatrixAmuBuffer::noteCommit(ThreadID tid, InstSeqNum seq_num)
+MatrixAmuBuffer::noteCommit(ThreadID tid, InstSeqNum seq_num,
+                            Tick commit_tick)
 {
     auto *entry = find(seq_num);
     panic_if(!entry, "[tid:%i] Matrix AMU entry missing at commit [sn:%llu]",
              tid, seq_num);
     entry->committed = true;
+    entry->commitTick = commit_tick;
     if (!entry->needAMU) {
         entry->canDeq = true;
     }

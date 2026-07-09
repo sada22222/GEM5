@@ -111,6 +111,320 @@ requestKindName(matrix::CuteRequestKind kind)
     return "unknown";
 }
 
+bool
+matrixInstTimingKind(const matrix::CuteRequest &req,
+                     CPU::MatrixInstTimingKind &kind)
+{
+    switch (req.kind) {
+      case matrix::CuteRequestKind::Mma:
+        kind = CPU::MatrixInstTimingKind::Mma;
+        return true;
+      case matrix::CuteRequestKind::Lsu:
+        if (req.lsu.isStore) {
+            kind = CPU::MatrixInstTimingKind::StoreC;
+            return true;
+        }
+        if (req.lsu.isAcc) {
+            kind = CPU::MatrixInstTimingKind::CLoad;
+            return true;
+        }
+        if (req.lsu.isB) {
+            kind = CPU::MatrixInstTimingKind::BLoad;
+            return true;
+        }
+        kind = CPU::MatrixInstTimingKind::ALoad;
+        return true;
+      case matrix::CuteRequestKind::Arith:
+      case matrix::CuteRequestKind::Release:
+        return false;
+    }
+
+    return false;
+}
+
+enum class MatrixTimingSegment
+{
+    FetchToCuteFinish,
+    FetchToAmuCommit,
+    AmuIssueToCuteFinish,
+    AmuIssueToCuteIssue,
+    AmuBufferEnqToCommit,
+    AmuBufferCommitToFire,
+    AmuBufferWritebackToFire,
+    AmuBufferEnqToFire
+};
+
+struct MatrixLatencyStatRefs
+{
+    statistics::Scalar *samples = nullptr;
+    statistics::Scalar *total = nullptr;
+    statistics::Scalar *maximum = nullptr;
+};
+
+MatrixLatencyStatRefs
+matrixLatencyStatRefs(CPU::CPUStats &stats,
+                      MatrixTimingSegment segment,
+                      CPU::MatrixInstTimingKind kind)
+{
+    switch (segment) {
+      case MatrixTimingSegment::FetchToCuteFinish:
+        switch (kind) {
+          case CPU::MatrixInstTimingKind::ALoad:
+            return {&stats.matrixInstFetchToCuteFinishSamplesALoad,
+                    &stats.matrixInstFetchToCuteFinishCyclesALoad,
+                    &stats.matrixInstFetchToCuteFinishCyclesALoadMax};
+          case CPU::MatrixInstTimingKind::BLoad:
+            return {&stats.matrixInstFetchToCuteFinishSamplesBLoad,
+                    &stats.matrixInstFetchToCuteFinishCyclesBLoad,
+                    &stats.matrixInstFetchToCuteFinishCyclesBLoadMax};
+          case CPU::MatrixInstTimingKind::CLoad:
+            return {&stats.matrixInstFetchToCuteFinishSamplesCLoad,
+                    &stats.matrixInstFetchToCuteFinishCyclesCLoad,
+                    &stats.matrixInstFetchToCuteFinishCyclesCLoadMax};
+          case CPU::MatrixInstTimingKind::StoreC:
+            return {&stats.matrixInstFetchToCuteFinishSamplesStoreC,
+                    &stats.matrixInstFetchToCuteFinishCyclesStoreC,
+                    &stats.matrixInstFetchToCuteFinishCyclesStoreCMax};
+          case CPU::MatrixInstTimingKind::Mma:
+            return {&stats.matrixInstFetchToCuteFinishSamplesMma,
+                    &stats.matrixInstFetchToCuteFinishCyclesMma,
+                    &stats.matrixInstFetchToCuteFinishCyclesMmaMax};
+          case CPU::MatrixInstTimingKind::NumKinds:
+            return {};
+        }
+        break;
+      case MatrixTimingSegment::FetchToAmuCommit:
+        switch (kind) {
+          case CPU::MatrixInstTimingKind::ALoad:
+            return {&stats.matrixInstFetchToAmuCommitSamplesALoad,
+                    &stats.matrixInstFetchToAmuCommitCyclesALoad,
+                    &stats.matrixInstFetchToAmuCommitCyclesALoadMax};
+          case CPU::MatrixInstTimingKind::BLoad:
+            return {&stats.matrixInstFetchToAmuCommitSamplesBLoad,
+                    &stats.matrixInstFetchToAmuCommitCyclesBLoad,
+                    &stats.matrixInstFetchToAmuCommitCyclesBLoadMax};
+          case CPU::MatrixInstTimingKind::CLoad:
+            return {&stats.matrixInstFetchToAmuCommitSamplesCLoad,
+                    &stats.matrixInstFetchToAmuCommitCyclesCLoad,
+                    &stats.matrixInstFetchToAmuCommitCyclesCLoadMax};
+          case CPU::MatrixInstTimingKind::StoreC:
+            return {&stats.matrixInstFetchToAmuCommitSamplesStoreC,
+                    &stats.matrixInstFetchToAmuCommitCyclesStoreC,
+                    &stats.matrixInstFetchToAmuCommitCyclesStoreCMax};
+          case CPU::MatrixInstTimingKind::Mma:
+            return {&stats.matrixInstFetchToAmuCommitSamplesMma,
+                    &stats.matrixInstFetchToAmuCommitCyclesMma,
+                    &stats.matrixInstFetchToAmuCommitCyclesMmaMax};
+          case CPU::MatrixInstTimingKind::NumKinds:
+            return {};
+        }
+        break;
+      case MatrixTimingSegment::AmuIssueToCuteFinish:
+        switch (kind) {
+          case CPU::MatrixInstTimingKind::ALoad:
+            return {&stats.matrixInstAmuIssueToCuteFinishSamplesALoad,
+                    &stats.matrixInstAmuIssueToCuteFinishCyclesALoad,
+                    &stats.matrixInstAmuIssueToCuteFinishCyclesALoadMax};
+          case CPU::MatrixInstTimingKind::BLoad:
+            return {&stats.matrixInstAmuIssueToCuteFinishSamplesBLoad,
+                    &stats.matrixInstAmuIssueToCuteFinishCyclesBLoad,
+                    &stats.matrixInstAmuIssueToCuteFinishCyclesBLoadMax};
+          case CPU::MatrixInstTimingKind::CLoad:
+            return {&stats.matrixInstAmuIssueToCuteFinishSamplesCLoad,
+                    &stats.matrixInstAmuIssueToCuteFinishCyclesCLoad,
+                    &stats.matrixInstAmuIssueToCuteFinishCyclesCLoadMax};
+          case CPU::MatrixInstTimingKind::StoreC:
+            return {&stats.matrixInstAmuIssueToCuteFinishSamplesStoreC,
+                    &stats.matrixInstAmuIssueToCuteFinishCyclesStoreC,
+                    &stats.matrixInstAmuIssueToCuteFinishCyclesStoreCMax};
+          case CPU::MatrixInstTimingKind::Mma:
+            return {&stats.matrixInstAmuIssueToCuteFinishSamplesMma,
+                    &stats.matrixInstAmuIssueToCuteFinishCyclesMma,
+                    &stats.matrixInstAmuIssueToCuteFinishCyclesMmaMax};
+          case CPU::MatrixInstTimingKind::NumKinds:
+            return {};
+        }
+        break;
+      case MatrixTimingSegment::AmuIssueToCuteIssue:
+        switch (kind) {
+          case CPU::MatrixInstTimingKind::ALoad:
+            return {&stats.matrixInstAmuIssueToCuteIssueSamplesALoad,
+                    &stats.matrixInstAmuIssueToCuteIssueCyclesALoad,
+                    &stats.matrixInstAmuIssueToCuteIssueCyclesALoadMax};
+          case CPU::MatrixInstTimingKind::BLoad:
+            return {&stats.matrixInstAmuIssueToCuteIssueSamplesBLoad,
+                    &stats.matrixInstAmuIssueToCuteIssueCyclesBLoad,
+                    &stats.matrixInstAmuIssueToCuteIssueCyclesBLoadMax};
+          case CPU::MatrixInstTimingKind::CLoad:
+            return {&stats.matrixInstAmuIssueToCuteIssueSamplesCLoad,
+                    &stats.matrixInstAmuIssueToCuteIssueCyclesCLoad,
+                    &stats.matrixInstAmuIssueToCuteIssueCyclesCLoadMax};
+          case CPU::MatrixInstTimingKind::StoreC:
+            return {&stats.matrixInstAmuIssueToCuteIssueSamplesStoreC,
+                    &stats.matrixInstAmuIssueToCuteIssueCyclesStoreC,
+                    &stats.matrixInstAmuIssueToCuteIssueCyclesStoreCMax};
+          case CPU::MatrixInstTimingKind::Mma:
+            return {&stats.matrixInstAmuIssueToCuteIssueSamplesMma,
+                    &stats.matrixInstAmuIssueToCuteIssueCyclesMma,
+                    &stats.matrixInstAmuIssueToCuteIssueCyclesMmaMax};
+          case CPU::MatrixInstTimingKind::NumKinds:
+            return {};
+        }
+        break;
+      case MatrixTimingSegment::AmuBufferEnqToCommit:
+        switch (kind) {
+          case CPU::MatrixInstTimingKind::ALoad:
+            return {&stats.matrixAmuBufferEnqToCommitSamplesALoad,
+                    &stats.matrixAmuBufferEnqToCommitCyclesALoad,
+                    &stats.matrixAmuBufferEnqToCommitCyclesALoadMax};
+          case CPU::MatrixInstTimingKind::BLoad:
+            return {&stats.matrixAmuBufferEnqToCommitSamplesBLoad,
+                    &stats.matrixAmuBufferEnqToCommitCyclesBLoad,
+                    &stats.matrixAmuBufferEnqToCommitCyclesBLoadMax};
+          case CPU::MatrixInstTimingKind::CLoad:
+            return {&stats.matrixAmuBufferEnqToCommitSamplesCLoad,
+                    &stats.matrixAmuBufferEnqToCommitCyclesCLoad,
+                    &stats.matrixAmuBufferEnqToCommitCyclesCLoadMax};
+          case CPU::MatrixInstTimingKind::StoreC:
+            return {&stats.matrixAmuBufferEnqToCommitSamplesStoreC,
+                    &stats.matrixAmuBufferEnqToCommitCyclesStoreC,
+                    &stats.matrixAmuBufferEnqToCommitCyclesStoreCMax};
+          case CPU::MatrixInstTimingKind::Mma:
+            return {&stats.matrixAmuBufferEnqToCommitSamplesMma,
+                    &stats.matrixAmuBufferEnqToCommitCyclesMma,
+                    &stats.matrixAmuBufferEnqToCommitCyclesMmaMax};
+          case CPU::MatrixInstTimingKind::NumKinds:
+            return {};
+        }
+        break;
+      case MatrixTimingSegment::AmuBufferCommitToFire:
+        switch (kind) {
+          case CPU::MatrixInstTimingKind::ALoad:
+            return {&stats.matrixAmuBufferCommitToFireSamplesALoad,
+                    &stats.matrixAmuBufferCommitToFireCyclesALoad,
+                    &stats.matrixAmuBufferCommitToFireCyclesALoadMax};
+          case CPU::MatrixInstTimingKind::BLoad:
+            return {&stats.matrixAmuBufferCommitToFireSamplesBLoad,
+                    &stats.matrixAmuBufferCommitToFireCyclesBLoad,
+                    &stats.matrixAmuBufferCommitToFireCyclesBLoadMax};
+          case CPU::MatrixInstTimingKind::CLoad:
+            return {&stats.matrixAmuBufferCommitToFireSamplesCLoad,
+                    &stats.matrixAmuBufferCommitToFireCyclesCLoad,
+                    &stats.matrixAmuBufferCommitToFireCyclesCLoadMax};
+          case CPU::MatrixInstTimingKind::StoreC:
+            return {&stats.matrixAmuBufferCommitToFireSamplesStoreC,
+                    &stats.matrixAmuBufferCommitToFireCyclesStoreC,
+                    &stats.matrixAmuBufferCommitToFireCyclesStoreCMax};
+          case CPU::MatrixInstTimingKind::Mma:
+            return {&stats.matrixAmuBufferCommitToFireSamplesMma,
+                    &stats.matrixAmuBufferCommitToFireCyclesMma,
+                    &stats.matrixAmuBufferCommitToFireCyclesMmaMax};
+          case CPU::MatrixInstTimingKind::NumKinds:
+            return {};
+        }
+        break;
+      case MatrixTimingSegment::AmuBufferWritebackToFire:
+        switch (kind) {
+          case CPU::MatrixInstTimingKind::ALoad:
+            return {&stats.matrixAmuBufferWritebackToFireSamplesALoad,
+                    &stats.matrixAmuBufferWritebackToFireCyclesALoad,
+                    &stats.matrixAmuBufferWritebackToFireCyclesALoadMax};
+          case CPU::MatrixInstTimingKind::BLoad:
+            return {&stats.matrixAmuBufferWritebackToFireSamplesBLoad,
+                    &stats.matrixAmuBufferWritebackToFireCyclesBLoad,
+                    &stats.matrixAmuBufferWritebackToFireCyclesBLoadMax};
+          case CPU::MatrixInstTimingKind::CLoad:
+            return {&stats.matrixAmuBufferWritebackToFireSamplesCLoad,
+                    &stats.matrixAmuBufferWritebackToFireCyclesCLoad,
+                    &stats.matrixAmuBufferWritebackToFireCyclesCLoadMax};
+          case CPU::MatrixInstTimingKind::StoreC:
+            return {&stats.matrixAmuBufferWritebackToFireSamplesStoreC,
+                    &stats.matrixAmuBufferWritebackToFireCyclesStoreC,
+                    &stats.matrixAmuBufferWritebackToFireCyclesStoreCMax};
+          case CPU::MatrixInstTimingKind::Mma:
+            return {&stats.matrixAmuBufferWritebackToFireSamplesMma,
+                    &stats.matrixAmuBufferWritebackToFireCyclesMma,
+                    &stats.matrixAmuBufferWritebackToFireCyclesMmaMax};
+          case CPU::MatrixInstTimingKind::NumKinds:
+            return {};
+        }
+        break;
+      case MatrixTimingSegment::AmuBufferEnqToFire:
+        switch (kind) {
+          case CPU::MatrixInstTimingKind::ALoad:
+            return {&stats.matrixAmuBufferEnqToFireSamplesALoad,
+                    &stats.matrixAmuBufferEnqToFireCyclesALoad,
+                    &stats.matrixAmuBufferEnqToFireCyclesALoadMax};
+          case CPU::MatrixInstTimingKind::BLoad:
+            return {&stats.matrixAmuBufferEnqToFireSamplesBLoad,
+                    &stats.matrixAmuBufferEnqToFireCyclesBLoad,
+                    &stats.matrixAmuBufferEnqToFireCyclesBLoadMax};
+          case CPU::MatrixInstTimingKind::CLoad:
+            return {&stats.matrixAmuBufferEnqToFireSamplesCLoad,
+                    &stats.matrixAmuBufferEnqToFireCyclesCLoad,
+                    &stats.matrixAmuBufferEnqToFireCyclesCLoadMax};
+          case CPU::MatrixInstTimingKind::StoreC:
+            return {&stats.matrixAmuBufferEnqToFireSamplesStoreC,
+                    &stats.matrixAmuBufferEnqToFireCyclesStoreC,
+                    &stats.matrixAmuBufferEnqToFireCyclesStoreCMax};
+          case CPU::MatrixInstTimingKind::Mma:
+            return {&stats.matrixAmuBufferEnqToFireSamplesMma,
+                    &stats.matrixAmuBufferEnqToFireCyclesMma,
+                    &stats.matrixAmuBufferEnqToFireCyclesMmaMax};
+          case CPU::MatrixInstTimingKind::NumKinds:
+            return {};
+        }
+        break;
+    }
+
+    return {};
+}
+
+void
+recordMatrixLatency(CPU::CPUStats &stats,
+                    MatrixTimingSegment segment,
+                    CPU::MatrixInstTimingKind kind,
+                    uint64_t cycles)
+{
+    switch (segment) {
+      case MatrixTimingSegment::FetchToCuteFinish:
+        ++stats.matrixInstFetchToCuteFinishSamples;
+        break;
+      case MatrixTimingSegment::FetchToAmuCommit:
+        ++stats.matrixInstFetchToAmuCommitSamples;
+        break;
+      case MatrixTimingSegment::AmuIssueToCuteFinish:
+        ++stats.matrixInstAmuIssueToCuteFinishSamples;
+        break;
+      case MatrixTimingSegment::AmuIssueToCuteIssue:
+        ++stats.matrixInstAmuIssueToCuteIssueSamples;
+        break;
+      case MatrixTimingSegment::AmuBufferEnqToCommit:
+        ++stats.matrixAmuBufferEnqToCommitSamples;
+        break;
+      case MatrixTimingSegment::AmuBufferCommitToFire:
+        ++stats.matrixAmuBufferCommitToFireSamples;
+        break;
+      case MatrixTimingSegment::AmuBufferWritebackToFire:
+        ++stats.matrixAmuBufferWritebackToFireSamples;
+        break;
+      case MatrixTimingSegment::AmuBufferEnqToFire:
+        ++stats.matrixAmuBufferEnqToFireSamples;
+        break;
+    }
+
+    auto refs = matrixLatencyStatRefs(stats, segment, kind);
+    if (!refs.samples || !refs.total || !refs.maximum) {
+        return;
+    }
+
+    ++(*refs.samples);
+    *refs.total += cycles;
+    if (cycles > refs.maximum->value()) {
+        *refs.maximum = cycles;
+    }
+}
+
 std::vector<bool>
 byteEnableFromMask(uint64_t byte_mask, uint32_t packet_size)
 {
@@ -465,7 +779,14 @@ CPU::CPU(const BaseO3CPUParams &params)
     if (enableMatrixBackend) {
         constexpr unsigned detailedCuteFifoDepth = 8;
         auto detailed_backend = std::make_unique<matrix::DetailedCuteBackend>(
-            detailedCuteFifoDepth);
+            detailedCuteFifoDepth,
+            matrix::MatrixRegFile::DefaultAbRegCount,
+            matrix::MatrixRegFile::DefaultCRegCount,
+            this);
+        detailed_backend->setIssueCallback(
+            [this](uint64_t seq) {
+                noteMatrixBackendCuteIssue(static_cast<InstSeqNum>(seq));
+            });
         if (enableMatrixMemPort) {
             detailed_backend->setTimingMemoryAdapter(&matrixMemPort);
         }
@@ -754,6 +1075,402 @@ CPU::CPUStats::CPUStats(CPU *cpu)
                "number of misc regfile reads"),
       ADD_STAT(miscRegfileWrites, statistics::units::Count::get(),
                "number of misc regfile writes"),
+      ADD_STAT(matrixInstFetchToCuteFinishSamples,
+               statistics::units::Count::get(),
+               "Matrix GEMM instruction samples with fetch-to-CUTE-finish "
+               "latency recorded"),
+      ADD_STAT(matrixInstFetchToCuteFinishSamplesALoad,
+               statistics::units::Count::get(),
+               "ALoad samples with fetch-to-CUTE-finish latency recorded"),
+      ADD_STAT(matrixInstFetchToCuteFinishCyclesALoad,
+               statistics::units::Cycle::get(),
+               "Total ALoad fetch-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstFetchToCuteFinishCyclesALoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum ALoad fetch-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstFetchToCuteFinishSamplesBLoad,
+               statistics::units::Count::get(),
+               "BLoad samples with fetch-to-CUTE-finish latency recorded"),
+      ADD_STAT(matrixInstFetchToCuteFinishCyclesBLoad,
+               statistics::units::Cycle::get(),
+               "Total BLoad fetch-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstFetchToCuteFinishCyclesBLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum BLoad fetch-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstFetchToCuteFinishSamplesCLoad,
+               statistics::units::Count::get(),
+               "CLoad samples with fetch-to-CUTE-finish latency recorded"),
+      ADD_STAT(matrixInstFetchToCuteFinishCyclesCLoad,
+               statistics::units::Cycle::get(),
+               "Total CLoad fetch-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstFetchToCuteFinishCyclesCLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum CLoad fetch-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstFetchToCuteFinishSamplesStoreC,
+               statistics::units::Count::get(),
+               "StoreC samples with fetch-to-CUTE-finish latency recorded"),
+      ADD_STAT(matrixInstFetchToCuteFinishCyclesStoreC,
+               statistics::units::Cycle::get(),
+               "Total StoreC fetch-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstFetchToCuteFinishCyclesStoreCMax,
+               statistics::units::Cycle::get(),
+               "Maximum StoreC fetch-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstFetchToCuteFinishSamplesMma,
+               statistics::units::Count::get(),
+               "MMA samples with fetch-to-CUTE-finish latency recorded"),
+      ADD_STAT(matrixInstFetchToCuteFinishCyclesMma,
+               statistics::units::Cycle::get(),
+               "Total MMA fetch-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstFetchToCuteFinishCyclesMmaMax,
+               statistics::units::Cycle::get(),
+               "Maximum MMA fetch-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstFetchToAmuCommitSamples,
+               statistics::units::Count::get(),
+               "Matrix GEMM instruction samples with fetch-to-AMU-commit "
+               "latency recorded"),
+      ADD_STAT(matrixInstFetchToAmuCommitSamplesALoad,
+               statistics::units::Count::get(),
+               "ALoad samples with fetch-to-AMU-commit latency recorded"),
+      ADD_STAT(matrixInstFetchToAmuCommitCyclesALoad,
+               statistics::units::Cycle::get(),
+               "Total ALoad fetch-to-AMU-commit cycles"),
+      ADD_STAT(matrixInstFetchToAmuCommitCyclesALoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum ALoad fetch-to-AMU-commit cycles"),
+      ADD_STAT(matrixInstFetchToAmuCommitSamplesBLoad,
+               statistics::units::Count::get(),
+               "BLoad samples with fetch-to-AMU-commit latency recorded"),
+      ADD_STAT(matrixInstFetchToAmuCommitCyclesBLoad,
+               statistics::units::Cycle::get(),
+               "Total BLoad fetch-to-AMU-commit cycles"),
+      ADD_STAT(matrixInstFetchToAmuCommitCyclesBLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum BLoad fetch-to-AMU-commit cycles"),
+      ADD_STAT(matrixInstFetchToAmuCommitSamplesCLoad,
+               statistics::units::Count::get(),
+               "CLoad samples with fetch-to-AMU-commit latency recorded"),
+      ADD_STAT(matrixInstFetchToAmuCommitCyclesCLoad,
+               statistics::units::Cycle::get(),
+               "Total CLoad fetch-to-AMU-commit cycles"),
+      ADD_STAT(matrixInstFetchToAmuCommitCyclesCLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum CLoad fetch-to-AMU-commit cycles"),
+      ADD_STAT(matrixInstFetchToAmuCommitSamplesStoreC,
+               statistics::units::Count::get(),
+               "StoreC samples with fetch-to-AMU-commit latency recorded"),
+      ADD_STAT(matrixInstFetchToAmuCommitCyclesStoreC,
+               statistics::units::Cycle::get(),
+               "Total StoreC fetch-to-AMU-commit cycles"),
+      ADD_STAT(matrixInstFetchToAmuCommitCyclesStoreCMax,
+               statistics::units::Cycle::get(),
+               "Maximum StoreC fetch-to-AMU-commit cycles"),
+      ADD_STAT(matrixInstFetchToAmuCommitSamplesMma,
+               statistics::units::Count::get(),
+               "MMA samples with fetch-to-AMU-commit latency recorded"),
+      ADD_STAT(matrixInstFetchToAmuCommitCyclesMma,
+               statistics::units::Cycle::get(),
+               "Total MMA fetch-to-AMU-commit cycles"),
+      ADD_STAT(matrixInstFetchToAmuCommitCyclesMmaMax,
+               statistics::units::Cycle::get(),
+               "Maximum MMA fetch-to-AMU-commit cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishSamples,
+               statistics::units::Count::get(),
+               "Matrix GEMM instruction samples with AMU-issue-to-CUTE-finish "
+               "latency recorded"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishSamplesALoad,
+               statistics::units::Count::get(),
+               "ALoad samples with AMU-issue-to-CUTE-finish latency recorded"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishCyclesALoad,
+               statistics::units::Cycle::get(),
+               "Total ALoad AMU-issue-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishCyclesALoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum ALoad AMU-issue-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishSamplesBLoad,
+               statistics::units::Count::get(),
+               "BLoad samples with AMU-issue-to-CUTE-finish latency recorded"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishCyclesBLoad,
+               statistics::units::Cycle::get(),
+               "Total BLoad AMU-issue-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishCyclesBLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum BLoad AMU-issue-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishSamplesCLoad,
+               statistics::units::Count::get(),
+               "CLoad samples with AMU-issue-to-CUTE-finish latency recorded"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishCyclesCLoad,
+               statistics::units::Cycle::get(),
+               "Total CLoad AMU-issue-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishCyclesCLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum CLoad AMU-issue-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishSamplesStoreC,
+               statistics::units::Count::get(),
+               "StoreC samples with AMU-issue-to-CUTE-finish latency recorded"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishCyclesStoreC,
+               statistics::units::Cycle::get(),
+               "Total StoreC AMU-issue-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishCyclesStoreCMax,
+               statistics::units::Cycle::get(),
+               "Maximum StoreC AMU-issue-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishSamplesMma,
+               statistics::units::Count::get(),
+               "MMA samples with AMU-issue-to-CUTE-finish latency recorded"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishCyclesMma,
+               statistics::units::Cycle::get(),
+               "Total MMA AMU-issue-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteFinishCyclesMmaMax,
+               statistics::units::Cycle::get(),
+               "Maximum MMA AMU-issue-to-CUTE-finish cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueSamples,
+               statistics::units::Count::get(),
+               "Matrix GEMM instruction samples with AMU-issue-to-CUTE-issue "
+               "latency recorded"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueSamplesALoad,
+               statistics::units::Count::get(),
+               "ALoad samples with AMU-issue-to-CUTE-issue latency recorded"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueCyclesALoad,
+               statistics::units::Cycle::get(),
+               "Total ALoad AMU-issue-to-CUTE-issue cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueCyclesALoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum ALoad AMU-issue-to-CUTE-issue cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueSamplesBLoad,
+               statistics::units::Count::get(),
+               "BLoad samples with AMU-issue-to-CUTE-issue latency recorded"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueCyclesBLoad,
+               statistics::units::Cycle::get(),
+               "Total BLoad AMU-issue-to-CUTE-issue cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueCyclesBLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum BLoad AMU-issue-to-CUTE-issue cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueSamplesCLoad,
+               statistics::units::Count::get(),
+               "CLoad samples with AMU-issue-to-CUTE-issue latency recorded"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueCyclesCLoad,
+               statistics::units::Cycle::get(),
+               "Total CLoad AMU-issue-to-CUTE-issue cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueCyclesCLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum CLoad AMU-issue-to-CUTE-issue cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueSamplesStoreC,
+               statistics::units::Count::get(),
+               "StoreC samples with AMU-issue-to-CUTE-issue latency recorded"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueCyclesStoreC,
+               statistics::units::Cycle::get(),
+               "Total StoreC AMU-issue-to-CUTE-issue cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueCyclesStoreCMax,
+               statistics::units::Cycle::get(),
+               "Maximum StoreC AMU-issue-to-CUTE-issue cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueSamplesMma,
+               statistics::units::Count::get(),
+               "MMA samples with AMU-issue-to-CUTE-issue latency recorded"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueCyclesMma,
+               statistics::units::Cycle::get(),
+               "Total MMA AMU-issue-to-CUTE-issue cycles"),
+      ADD_STAT(matrixInstAmuIssueToCuteIssueCyclesMmaMax,
+               statistics::units::Cycle::get(),
+               "Maximum MMA AMU-issue-to-CUTE-issue cycles"),
+      ADD_STAT(matrixAmuBufferEnqToCommitSamples,
+               statistics::units::Count::get(),
+               "Matrix GEMM instruction samples with AMU-buffer-enq-to-commit "
+               "latency recorded"),
+      ADD_STAT(matrixAmuBufferEnqToCommitSamplesALoad,
+               statistics::units::Count::get(),
+               "ALoad samples with AMU-buffer-enq-to-commit latency recorded"),
+      ADD_STAT(matrixAmuBufferEnqToCommitCyclesALoad,
+               statistics::units::Cycle::get(),
+               "Total ALoad AMU-buffer-enq-to-commit cycles"),
+      ADD_STAT(matrixAmuBufferEnqToCommitCyclesALoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum ALoad AMU-buffer-enq-to-commit cycles"),
+      ADD_STAT(matrixAmuBufferEnqToCommitSamplesBLoad,
+               statistics::units::Count::get(),
+               "BLoad samples with AMU-buffer-enq-to-commit latency recorded"),
+      ADD_STAT(matrixAmuBufferEnqToCommitCyclesBLoad,
+               statistics::units::Cycle::get(),
+               "Total BLoad AMU-buffer-enq-to-commit cycles"),
+      ADD_STAT(matrixAmuBufferEnqToCommitCyclesBLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum BLoad AMU-buffer-enq-to-commit cycles"),
+      ADD_STAT(matrixAmuBufferEnqToCommitSamplesCLoad,
+               statistics::units::Count::get(),
+               "CLoad samples with AMU-buffer-enq-to-commit latency recorded"),
+      ADD_STAT(matrixAmuBufferEnqToCommitCyclesCLoad,
+               statistics::units::Cycle::get(),
+               "Total CLoad AMU-buffer-enq-to-commit cycles"),
+      ADD_STAT(matrixAmuBufferEnqToCommitCyclesCLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum CLoad AMU-buffer-enq-to-commit cycles"),
+      ADD_STAT(matrixAmuBufferEnqToCommitSamplesStoreC,
+               statistics::units::Count::get(),
+               "StoreC samples with AMU-buffer-enq-to-commit latency recorded"),
+      ADD_STAT(matrixAmuBufferEnqToCommitCyclesStoreC,
+               statistics::units::Cycle::get(),
+               "Total StoreC AMU-buffer-enq-to-commit cycles"),
+      ADD_STAT(matrixAmuBufferEnqToCommitCyclesStoreCMax,
+               statistics::units::Cycle::get(),
+               "Maximum StoreC AMU-buffer-enq-to-commit cycles"),
+      ADD_STAT(matrixAmuBufferEnqToCommitSamplesMma,
+               statistics::units::Count::get(),
+               "MMA samples with AMU-buffer-enq-to-commit latency recorded"),
+      ADD_STAT(matrixAmuBufferEnqToCommitCyclesMma,
+               statistics::units::Cycle::get(),
+               "Total MMA AMU-buffer-enq-to-commit cycles"),
+      ADD_STAT(matrixAmuBufferEnqToCommitCyclesMmaMax,
+               statistics::units::Cycle::get(),
+               "Maximum MMA AMU-buffer-enq-to-commit cycles"),
+      ADD_STAT(matrixAmuBufferCommitToFireSamples,
+               statistics::units::Count::get(),
+               "Matrix GEMM instruction samples with AMU-buffer-commit-to-fire "
+               "latency recorded"),
+      ADD_STAT(matrixAmuBufferCommitToFireSamplesALoad,
+               statistics::units::Count::get(),
+               "ALoad samples with AMU-buffer-commit-to-fire latency recorded"),
+      ADD_STAT(matrixAmuBufferCommitToFireCyclesALoad,
+               statistics::units::Cycle::get(),
+               "Total ALoad AMU-buffer-commit-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferCommitToFireCyclesALoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum ALoad AMU-buffer-commit-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferCommitToFireSamplesBLoad,
+               statistics::units::Count::get(),
+               "BLoad samples with AMU-buffer-commit-to-fire latency recorded"),
+      ADD_STAT(matrixAmuBufferCommitToFireCyclesBLoad,
+               statistics::units::Cycle::get(),
+               "Total BLoad AMU-buffer-commit-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferCommitToFireCyclesBLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum BLoad AMU-buffer-commit-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferCommitToFireSamplesCLoad,
+               statistics::units::Count::get(),
+               "CLoad samples with AMU-buffer-commit-to-fire latency recorded"),
+      ADD_STAT(matrixAmuBufferCommitToFireCyclesCLoad,
+               statistics::units::Cycle::get(),
+               "Total CLoad AMU-buffer-commit-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferCommitToFireCyclesCLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum CLoad AMU-buffer-commit-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferCommitToFireSamplesStoreC,
+               statistics::units::Count::get(),
+               "StoreC samples with AMU-buffer-commit-to-fire latency recorded"),
+      ADD_STAT(matrixAmuBufferCommitToFireCyclesStoreC,
+               statistics::units::Cycle::get(),
+               "Total StoreC AMU-buffer-commit-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferCommitToFireCyclesStoreCMax,
+               statistics::units::Cycle::get(),
+               "Maximum StoreC AMU-buffer-commit-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferCommitToFireSamplesMma,
+               statistics::units::Count::get(),
+               "MMA samples with AMU-buffer-commit-to-fire latency recorded"),
+      ADD_STAT(matrixAmuBufferCommitToFireCyclesMma,
+               statistics::units::Cycle::get(),
+               "Total MMA AMU-buffer-commit-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferCommitToFireCyclesMmaMax,
+               statistics::units::Cycle::get(),
+               "Maximum MMA AMU-buffer-commit-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferWritebackToFireSamples,
+               statistics::units::Count::get(),
+               "Matrix GEMM instruction samples with "
+               "AMU-buffer-writeback-to-fire latency recorded"),
+      ADD_STAT(matrixAmuBufferWritebackToFireSamplesALoad,
+               statistics::units::Count::get(),
+               "ALoad samples with AMU-buffer-writeback-to-fire latency "
+               "recorded"),
+      ADD_STAT(matrixAmuBufferWritebackToFireCyclesALoad,
+               statistics::units::Cycle::get(),
+               "Total ALoad AMU-buffer-writeback-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferWritebackToFireCyclesALoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum ALoad AMU-buffer-writeback-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferWritebackToFireSamplesBLoad,
+               statistics::units::Count::get(),
+               "BLoad samples with AMU-buffer-writeback-to-fire latency "
+               "recorded"),
+      ADD_STAT(matrixAmuBufferWritebackToFireCyclesBLoad,
+               statistics::units::Cycle::get(),
+               "Total BLoad AMU-buffer-writeback-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferWritebackToFireCyclesBLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum BLoad AMU-buffer-writeback-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferWritebackToFireSamplesCLoad,
+               statistics::units::Count::get(),
+               "CLoad samples with AMU-buffer-writeback-to-fire latency "
+               "recorded"),
+      ADD_STAT(matrixAmuBufferWritebackToFireCyclesCLoad,
+               statistics::units::Cycle::get(),
+               "Total CLoad AMU-buffer-writeback-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferWritebackToFireCyclesCLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum CLoad AMU-buffer-writeback-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferWritebackToFireSamplesStoreC,
+               statistics::units::Count::get(),
+               "StoreC samples with AMU-buffer-writeback-to-fire latency "
+               "recorded"),
+      ADD_STAT(matrixAmuBufferWritebackToFireCyclesStoreC,
+               statistics::units::Cycle::get(),
+               "Total StoreC AMU-buffer-writeback-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferWritebackToFireCyclesStoreCMax,
+               statistics::units::Cycle::get(),
+               "Maximum StoreC AMU-buffer-writeback-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferWritebackToFireSamplesMma,
+               statistics::units::Count::get(),
+               "MMA samples with AMU-buffer-writeback-to-fire latency recorded"),
+      ADD_STAT(matrixAmuBufferWritebackToFireCyclesMma,
+               statistics::units::Cycle::get(),
+               "Total MMA AMU-buffer-writeback-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferWritebackToFireCyclesMmaMax,
+               statistics::units::Cycle::get(),
+               "Maximum MMA AMU-buffer-writeback-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferEnqToFireSamples,
+               statistics::units::Count::get(),
+               "Matrix GEMM instruction samples with AMU-buffer-enq-to-fire "
+               "latency recorded"),
+      ADD_STAT(matrixAmuBufferEnqToFireSamplesALoad,
+               statistics::units::Count::get(),
+               "ALoad samples with AMU-buffer-enq-to-fire latency recorded"),
+      ADD_STAT(matrixAmuBufferEnqToFireCyclesALoad,
+               statistics::units::Cycle::get(),
+               "Total ALoad AMU-buffer-enq-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferEnqToFireCyclesALoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum ALoad AMU-buffer-enq-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferEnqToFireSamplesBLoad,
+               statistics::units::Count::get(),
+               "BLoad samples with AMU-buffer-enq-to-fire latency recorded"),
+      ADD_STAT(matrixAmuBufferEnqToFireCyclesBLoad,
+               statistics::units::Cycle::get(),
+               "Total BLoad AMU-buffer-enq-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferEnqToFireCyclesBLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum BLoad AMU-buffer-enq-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferEnqToFireSamplesCLoad,
+               statistics::units::Count::get(),
+               "CLoad samples with AMU-buffer-enq-to-fire latency recorded"),
+      ADD_STAT(matrixAmuBufferEnqToFireCyclesCLoad,
+               statistics::units::Cycle::get(),
+               "Total CLoad AMU-buffer-enq-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferEnqToFireCyclesCLoadMax,
+               statistics::units::Cycle::get(),
+               "Maximum CLoad AMU-buffer-enq-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferEnqToFireSamplesStoreC,
+               statistics::units::Count::get(),
+               "StoreC samples with AMU-buffer-enq-to-fire latency recorded"),
+      ADD_STAT(matrixAmuBufferEnqToFireCyclesStoreC,
+               statistics::units::Cycle::get(),
+               "Total StoreC AMU-buffer-enq-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferEnqToFireCyclesStoreCMax,
+               statistics::units::Cycle::get(),
+               "Maximum StoreC AMU-buffer-enq-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferEnqToFireSamplesMma,
+               statistics::units::Count::get(),
+               "MMA samples with AMU-buffer-enq-to-fire latency recorded"),
+      ADD_STAT(matrixAmuBufferEnqToFireCyclesMma,
+               statistics::units::Cycle::get(),
+               "Total MMA AMU-buffer-enq-to-fire cycles"),
+      ADD_STAT(matrixAmuBufferEnqToFireCyclesMmaMax,
+               statistics::units::Cycle::get(),
+               "Maximum MMA AMU-buffer-enq-to-fire cycles"),
       ADD_STAT(lastCommitTick, statistics::units::Count::get(),
                "The last tick to commit an instruction")
 {
@@ -1607,7 +2324,8 @@ CPU::canAcceptMatrixBackendReq(const matrix::CuteRequest &req,
 
 bool
 CPU::submitMatrixBackendReq(ThreadID tid, const matrix::CuteRequest &req,
-                            InstSeqNum seq_num)
+                            InstSeqNum seq_num,
+                            const MatrixInstTiming *timing)
 {
 #if THE_ISA_IS_RISCV
     if (!matrixBackend) {
@@ -1623,6 +2341,13 @@ CPU::submitMatrixBackendReq(ThreadID tid, const matrix::CuteRequest &req,
     panic_if(!inserted,
              "Duplicate matrix backend owner [tid:%i] [sn:%llu]",
              tid, seq_num);
+    if (timing && timing->valid) {
+        const bool timing_inserted =
+            matrixBackendTimings.emplace(seq_num, *timing).second;
+        panic_if(!timing_inserted,
+                 "Duplicate matrix backend timing [tid:%i] [sn:%llu]",
+                 tid, seq_num);
+    }
 
     DPRINTF(MatrixCuteTrace,
             "backend submit [tid:%i] [sn:%llu] kind=%s.\n",
@@ -1635,6 +2360,30 @@ CPU::submitMatrixBackendReq(ThreadID tid, const matrix::CuteRequest &req,
     return true;
 #else
     panic("Matrix backend requests are only supported by the RISC-V ISA");
+#endif
+}
+
+void
+CPU::noteMatrixBackendCuteIssue(InstSeqNum seq_num)
+{
+#if THE_ISA_IS_RISCV
+    auto timing_it = matrixBackendTimings.find(seq_num);
+    if (timing_it == matrixBackendTimings.end()) {
+        return;
+    }
+
+    auto &timing = timing_it->second;
+    if (!timing.valid || timing.amuIssueTick == MaxTick ||
+        timing.cuteIssueTick != MaxTick || curTick() < timing.amuIssueTick) {
+        return;
+    }
+
+    timing.cuteIssueTick = curTick();
+    recordMatrixLatency(
+        cpuStats, MatrixTimingSegment::AmuIssueToCuteIssue, timing.kind,
+        ticksToCycles(timing.cuteIssueTick - timing.amuIssueTick));
+#else
+    (void)seq_num;
 #endif
 }
 
@@ -1670,6 +2419,33 @@ CPU::serviceMatrixBackend()
             commitMatrixReleaseToken(
                 it->second, completion.tokenIdx, completion.seq);
         }
+        auto timing_it = matrixBackendTimings.find(completion.seq);
+        if (timing_it != matrixBackendTimings.end()) {
+            const auto &timing = timing_it->second;
+            if (timing.valid && timing.fetchTick != MaxTick &&
+                curTick() >= timing.fetchTick) {
+                recordMatrixLatency(
+                    cpuStats, MatrixTimingSegment::FetchToCuteFinish,
+                    timing.kind,
+                    ticksToCycles(curTick() - timing.fetchTick));
+            }
+            if (timing.valid && timing.fetchTick != MaxTick &&
+                timing.amuCommitTick != MaxTick &&
+                timing.amuCommitTick >= timing.fetchTick) {
+                recordMatrixLatency(
+                    cpuStats, MatrixTimingSegment::FetchToAmuCommit,
+                    timing.kind,
+                    ticksToCycles(timing.amuCommitTick - timing.fetchTick));
+            }
+            if (timing.valid && timing.amuIssueTick != MaxTick &&
+                curTick() >= timing.amuIssueTick) {
+                recordMatrixLatency(
+                    cpuStats, MatrixTimingSegment::AmuIssueToCuteFinish,
+                    timing.kind,
+                    ticksToCycles(curTick() - timing.amuIssueTick));
+            }
+            matrixBackendTimings.erase(timing_it);
+        }
         matrixBackendOwners.erase(it);
     }
 
@@ -1692,6 +2468,41 @@ CPU::consumeMatrixAmuProxy(ThreadID tid,
 #if THE_ISA_IS_RISCV
     const auto &backend_req = entry.backendReq;
     const auto seq_num = entry.seqNum;
+    MatrixInstTiming timing = {};
+    MatrixInstTimingKind timing_kind = MatrixInstTimingKind::NumKinds;
+    if (matrixInstTimingKind(backend_req, timing_kind)) {
+        timing.valid = true;
+        timing.kind = timing_kind;
+        timing.fetchTick = entry.fetchTick;
+        timing.amuCommitTick = entry.commitTick;
+        timing.amuIssueTick = curTick();
+        if (entry.allocTick != MaxTick && entry.commitTick != MaxTick &&
+            entry.commitTick >= entry.allocTick) {
+            recordMatrixLatency(
+                cpuStats, MatrixTimingSegment::AmuBufferEnqToCommit,
+                timing_kind,
+                ticksToCycles(entry.commitTick - entry.allocTick));
+        }
+        if (entry.commitTick != MaxTick && curTick() >= entry.commitTick) {
+            recordMatrixLatency(
+                cpuStats, MatrixTimingSegment::AmuBufferCommitToFire,
+                timing_kind,
+                ticksToCycles(curTick() - entry.commitTick));
+        }
+        if (entry.writebackTick != MaxTick && curTick() >= entry.writebackTick) {
+            recordMatrixLatency(
+                cpuStats, MatrixTimingSegment::AmuBufferWritebackToFire,
+                timing_kind,
+                ticksToCycles(curTick() - entry.writebackTick));
+        }
+        if (entry.allocTick != MaxTick && curTick() >= entry.allocTick) {
+            recordMatrixLatency(
+                cpuStats, MatrixTimingSegment::AmuBufferEnqToFire,
+                timing_kind,
+                ticksToCycles(curTick() - entry.allocTick));
+        }
+    }
+    const MatrixInstTiming *timing_ptr = timing.valid ? &timing : nullptr;
 
     DPRINTF(Commit,
             "Matrix toAMU proxy fire [tid:%i] [sn:%llu] kind=%s.\n",
@@ -1701,7 +2512,7 @@ CPU::consumeMatrixAmuProxy(ThreadID tid,
       case matrix::CuteRequestKind::Release:
         {
             const bool submitted = submitMatrixBackendReq(
-                tid, backend_req, seq_num);
+                tid, backend_req, seq_num, timing_ptr);
             panic_if(!submitted,
                      "Matrix backend rejected release request after toAMU proxy "
                      "[tid:%i] [sn:%llu]",
@@ -1737,7 +2548,7 @@ CPU::consumeMatrixAmuProxy(ThreadID tid,
             req.dstElemType = backend_req.mma.dstElemType;
             req.sat = backend_req.mma.sat;
             const bool submitted = submitMatrixBackendReq(
-                tid, backend_req, seq_num);
+                tid, backend_req, seq_num, timing_ptr);
             panic_if(!submitted,
                      "Matrix backend rejected MMA request after toAMU proxy "
                      "[tid:%i] [sn:%llu]",
@@ -1752,7 +2563,7 @@ CPU::consumeMatrixAmuProxy(ThreadID tid,
             req.op = backend_req.op;
             req.md = backend_req.arith.reg;
             const bool submitted = submitMatrixBackendReq(
-                tid, backend_req, seq_num);
+                tid, backend_req, seq_num, timing_ptr);
             panic_if(!submitted,
                      "Matrix backend rejected arith request after toAMU proxy "
                      "[tid:%i] [sn:%llu]",
@@ -1778,7 +2589,7 @@ CPU::consumeMatrixAmuProxy(ThreadID tid,
             req.widths = backend_req.lsu.widths;
             req.elemType = backend_req.lsu.elemType;
             const bool submitted = submitMatrixBackendReq(
-                tid, backend_req, seq_num);
+                tid, backend_req, seq_num, timing_ptr);
             panic_if(!submitted,
                      "Matrix backend rejected LSU request after toAMU proxy "
                      "[tid:%i] [sn:%llu]",

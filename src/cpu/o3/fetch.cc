@@ -1870,6 +1870,7 @@ Fetch::processSingleInstruction(ThreadID tid, PCStateBase &pc,
         instruction->fetchTick = curTick();
     }
 #endif
+    instruction->noteMatrixFetched(curTick());
 
     // Save current PC to next_pc first
     set(next_pc, pc);

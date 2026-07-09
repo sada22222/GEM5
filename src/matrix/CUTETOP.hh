@@ -33,6 +33,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <functional>
 #include <optional>
 
 #include "matrix/LocalMMUModel.hh"
@@ -40,6 +41,7 @@
 #include "matrix/MatrixTE.hh"
 #include "matrix/MemoryLoader.hh"
 #include "matrix/Scoreboard.hh"
+#include "sim/stats.hh"
 
 namespace gem5
 {
@@ -85,11 +87,13 @@ class DetailedCuteBackend : public MatrixBackend
     explicit DetailedCuteBackend(
         size_t fifo_depth = 8,
         size_t ab_reg_count = MatrixRegFile::DefaultAbRegCount,
-        size_t c_reg_count = MatrixRegFile::DefaultCRegCount);
+        size_t c_reg_count = MatrixRegFile::DefaultCRegCount,
+        statistics::Group *stats_parent = nullptr);
     DetailedCuteBackend(size_t fifo_depth,
                         size_t ab_reg_count,
                         size_t c_reg_count,
-                        TimingConfig timing_config);
+                        TimingConfig timing_config,
+                        statistics::Group *stats_parent = nullptr);
 
     bool canAccept(const CuteRequest &req) const override;
     void submit(const CuteRequest &req) override;
@@ -109,6 +113,10 @@ class DetailedCuteBackend : public MatrixBackend
     void setTimingMemoryAdapter(MatrixTimingMemoryAdapter *adapter)
     {
         timingMemory = adapter;
+    }
+    void setIssueCallback(std::function<void(uint64_t)> callback)
+    {
+        issueCallback = callback;
     }
     bool completeTimingMemoryResponse(
         uint32_t source_id, const uint8_t *data = nullptr,
@@ -167,6 +175,36 @@ class DetailedCuteBackend : public MatrixBackend
         MatrixTensor bufferedTensor = {};
         bool hasBufferedTensor = false;
         uint64_t issueStep = 0;
+    };
+
+    struct CutePhaseStats : public statistics::Group
+    {
+        CutePhaseStats(statistics::Group *parent);
+
+        statistics::Scalar matrixCuteALoadIssue;
+        statistics::Scalar matrixCuteALoadFinish;
+        statistics::Scalar matrixCuteALoadIssueToFinishCycles;
+        statistics::Scalar matrixCuteALoadIssueToFinishCyclesMax;
+        statistics::Scalar matrixCuteBLoadIssue;
+        statistics::Scalar matrixCuteBLoadFinish;
+        statistics::Scalar matrixCuteBLoadIssueToFinishCycles;
+        statistics::Scalar matrixCuteBLoadIssueToFinishCyclesMax;
+        statistics::Scalar matrixCuteCLoadIssue;
+        statistics::Scalar matrixCuteCLoadFinish;
+        statistics::Scalar matrixCuteCLoadIssueToFinishCycles;
+        statistics::Scalar matrixCuteCLoadIssueToFinishCyclesMax;
+        statistics::Scalar matrixCuteStoreIssue;
+        statistics::Scalar matrixCuteStoreFinish;
+        statistics::Scalar matrixCuteStoreIssueToFinishCycles;
+        statistics::Scalar matrixCuteStoreIssueToFinishCyclesMax;
+        statistics::Scalar matrixCuteMmaIssue;
+        statistics::Scalar matrixCuteMmaFinish;
+        statistics::Scalar matrixCuteMmaIssueToFinishCycles;
+        statistics::Scalar matrixCuteMmaIssueToFinishCyclesMax;
+        statistics::Scalar matrixCuteReleaseIssue;
+        statistics::Scalar matrixCuteReleaseFinish;
+        statistics::Scalar matrixCuteReleaseIssueToFinishCycles;
+        statistics::Scalar matrixCuteReleaseIssueToFinishCyclesMax;
     };
 
     struct ComputeTaskState
@@ -309,6 +347,14 @@ class DetailedCuteBackend : public MatrixBackend
                                CuteCompletion completion,
                                bool grant_all_cdc_beats = false,
                                bool record_cdc_finish = true);
+    bool isALoad(const DecodedFifoEntry &entry) const;
+    bool isBLoad(const DecodedFifoEntry &entry) const;
+    bool isCLoad(const DecodedFifoEntry &entry) const;
+    void recordCutePhaseIssue(const DecodedFifoEntry &entry);
+    void recordCutePhaseCompletion(const TaskEvent &event, uint64_t latency);
+    void recordCutePhaseLatency(statistics::Scalar &total,
+                                statistics::Scalar &maximum,
+                                uint64_t latency);
     MicroTaskKind microTaskKindForEntry(const DecodedFifoEntry &entry) const;
     bool useMemoryBudget();
     MatrixBankKind destBank(const DecodedFifoEntry &entry) const;
@@ -334,6 +380,8 @@ class DetailedCuteBackend : public MatrixBackend
     unsigned pendingStoreCount = 0;
     unsigned memoryBudget = 1;
     uint64_t backendStep = 0;
+    std::function<void(uint64_t)> issueCallback;
+    CutePhaseStats cutePhaseStats;
 };
 
 } // namespace matrix

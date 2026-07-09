@@ -132,7 +132,8 @@ class KunminghuScheduler(Scheduler):
         ]),
         IssueQue(name='intIQ3', inports=2, size=2*12, oports=[
             IssuePort(fu=[IntALU()], rp=[IntRD(6, 0), IntRD(7, 0)]),
-            IssuePort(fu=[IntDiv()], rp=[IntRD(0, 1), IntRD(1, 1)])
+            IssuePort(fu=[IntDiv(), MatrixSyncFU()],
+                      rp=[IntRD(0, 1), IntRD(1, 1)])
         ])
     ]
     __memIQs = [
@@ -178,14 +179,48 @@ class KunminghuScheduler(Scheduler):
             IssuePort(fu=[SIMD_Unit()])
         ], scheduleToExecDelay=3)
     ]
-    IQs = __intIQs + __memIQs + __fpIQs
+    __matrixIQs = [
+        IssueQue(name='matrixIntIQ', inports=2, size=16, oports=[
+            IssuePort(fu=[MatrixIntFU()],
+                      rp=[IntRD(12, 0), RMiscWR(0, 0)]),
+            IssuePort(fu=[MatrixReleaseFU()],
+                      rp=[IntRD(13, 1)])
+        ], scheduleToExecDelay=2),
+        IssueQue(name='matrixCsrIQ', inports=2, size=16, oports=[
+            IssuePort(fu=[MatrixCsrFU()],
+                      rp=[IntRD(12, 0), RMiscRD(0, 0),
+                          IntWR(3, 0), RMiscWR(1, 0)])
+        ], scheduleToExecDelay=2),
+        IssueQue(name='matrixExecIQ', inports=2, size=16, oports=[
+            IssuePort(fu=[MatrixMmaFU()],
+                      rp=[RMiscRD(1, 0), RMiscRD(2, 0), RMiscRD(3, 0),
+                          RMiscRD(4, 0), RMiscRD(5, 0), RMiscRD(6, 0)]),
+            IssuePort(fu=[MatrixArithFU()],
+                      rp=[RMiscRD(1, 1), RMiscRD(2, 1)])
+        ], scheduleToExecDelay=2),
+        IssueQue(name='matrixMemIQ', inports=2, size=16, oports=[
+            IssuePort(fu=[MatrixMemFU()],
+                      rp=[IntRD(14, 0), IntRD(15, 1),
+                          RMiscRD(7, 0), RMiscRD(8, 0)])
+        ], scheduleToExecDelay=3),
+    ]
+
+    IQs = __intIQs + __memIQs + __fpIQs + __matrixIQs
 
     __int_bank = [i.name for i in __intIQs]
     __mem_bank = [i.name for i in __memIQs]
     __fp_bank = [i.name for i in __fpIQs]
+    __matrix_bank = [i.name for i in __matrixIQs]
     specWakeupNetwork = [
         SpecWakeupChannel(srcs=__int_bank + __mem_bank, dsts=__int_bank + __mem_bank),
-        SpecWakeupChannel(srcs=__fp_bank, dsts=__fp_bank)
+        SpecWakeupChannel(srcs=__fp_bank, dsts=__fp_bank),
+        SpecWakeupChannel(
+            srcs=__int_bank + __mem_bank,
+            dsts=['matrixIntIQ', 'matrixCsrIQ', 'matrixExecIQ',
+                  'matrixMemIQ']
+        ),
+        SpecWakeupChannel(srcs=['matrixIntIQ'], dsts=__matrix_bank),
+        SpecWakeupChannel(srcs=['matrixCsrIQ'], dsts=__int_bank + __matrix_bank)
     ]
 
     def __init__(self, *args, **kwargs):

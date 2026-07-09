@@ -297,6 +297,7 @@ class DynInst : public ExecContext, public RefCounted
 
     MatrixInstInfo matrixInst;
     ExecContext::MatrixExecPayload matrixExecPayload;
+    Tick matrixFetchTick = MaxTick;
     bool stagedMatrixTokenResetValid = false;
     RegVal stagedMatrixTokenReset = 0;
 
@@ -809,6 +810,13 @@ class DynInst : public ExecContext, public RefCounted
     bool isFloating()     const { return staticInst->isFloating(); }
     bool isVector()       const { return staticInst->isVector(); }
     bool isMatrixInst()   const { return matrixInst.valid; }
+    void noteMatrixFetched(Tick tick)
+    {
+        if (matrixInst.valid) {
+            matrixFetchTick = tick;
+        }
+    }
+    Tick matrixFetchTime() const { return matrixFetchTick; }
     bool isControl()      const { return staticInst->isControl(); }
     bool isCall()         const { return staticInst->isCall(); }
     bool isReturn()       const { return staticInst->isReturn(); }

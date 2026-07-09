@@ -168,6 +168,161 @@ execRelease(uint64_t seq, const AmuReleaseDesc &desc)
 } // anonymous namespace
 
 // Active backend register, memory, and writeback helpers.
+DetailedCuteBackend::CutePhaseStats::CutePhaseStats(statistics::Group *parent)
+    : statistics::Group(parent, "matrix_cute"),
+      ADD_STAT(matrixCuteALoadIssue, statistics::units::Count::get(),
+               "CUTE ALoad tasks issued"),
+      ADD_STAT(matrixCuteALoadFinish, statistics::units::Count::get(),
+               "CUTE ALoad tasks finished"),
+      ADD_STAT(matrixCuteALoadIssueToFinishCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE ALoad issue-to-finish cycles"),
+      ADD_STAT(matrixCuteALoadIssueToFinishCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE ALoad issue-to-finish cycles"),
+      ADD_STAT(matrixCuteBLoadIssue, statistics::units::Count::get(),
+               "CUTE BLoad tasks issued"),
+      ADD_STAT(matrixCuteBLoadFinish, statistics::units::Count::get(),
+               "CUTE BLoad tasks finished"),
+      ADD_STAT(matrixCuteBLoadIssueToFinishCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE BLoad issue-to-finish cycles"),
+      ADD_STAT(matrixCuteBLoadIssueToFinishCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE BLoad issue-to-finish cycles"),
+      ADD_STAT(matrixCuteCLoadIssue, statistics::units::Count::get(),
+               "CUTE CLoad tasks issued"),
+      ADD_STAT(matrixCuteCLoadFinish, statistics::units::Count::get(),
+               "CUTE CLoad tasks finished"),
+      ADD_STAT(matrixCuteCLoadIssueToFinishCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE CLoad issue-to-finish cycles"),
+      ADD_STAT(matrixCuteCLoadIssueToFinishCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE CLoad issue-to-finish cycles"),
+      ADD_STAT(matrixCuteStoreIssue, statistics::units::Count::get(),
+               "CUTE StoreC tasks issued"),
+      ADD_STAT(matrixCuteStoreFinish, statistics::units::Count::get(),
+               "CUTE StoreC tasks finished"),
+      ADD_STAT(matrixCuteStoreIssueToFinishCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE StoreC issue-to-finish cycles"),
+      ADD_STAT(matrixCuteStoreIssueToFinishCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE StoreC issue-to-finish cycles"),
+      ADD_STAT(matrixCuteMmaIssue, statistics::units::Count::get(),
+               "CUTE MMA tasks issued"),
+      ADD_STAT(matrixCuteMmaFinish, statistics::units::Count::get(),
+               "CUTE MMA tasks finished"),
+      ADD_STAT(matrixCuteMmaIssueToFinishCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE MMA issue-to-finish cycles"),
+      ADD_STAT(matrixCuteMmaIssueToFinishCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE MMA issue-to-finish cycles"),
+      ADD_STAT(matrixCuteReleaseIssue, statistics::units::Count::get(),
+               "CUTE release tasks issued"),
+      ADD_STAT(matrixCuteReleaseFinish, statistics::units::Count::get(),
+               "CUTE release tasks finished"),
+      ADD_STAT(matrixCuteReleaseIssueToFinishCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE release issue-to-finish cycles"),
+      ADD_STAT(matrixCuteReleaseIssueToFinishCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE release issue-to-finish cycles")
+{
+}
+
+bool
+DetailedCuteBackend::isALoad(const DecodedFifoEntry &entry) const
+{
+    return entry.isLoad && !entry.request.lsu.isAcc && !entry.request.lsu.isB;
+}
+
+bool
+DetailedCuteBackend::isBLoad(const DecodedFifoEntry &entry) const
+{
+    return entry.isLoad && !entry.request.lsu.isAcc && entry.request.lsu.isB;
+}
+
+bool
+DetailedCuteBackend::isCLoad(const DecodedFifoEntry &entry) const
+{
+    return entry.isLoad && entry.request.lsu.isAcc;
+}
+
+void
+DetailedCuteBackend::recordCutePhaseLatency(statistics::Scalar &total,
+                                            statistics::Scalar &maximum,
+                                            uint64_t latency)
+{
+    total += latency;
+    if (latency > maximum.value()) {
+        maximum = latency;
+    }
+}
+
+void
+DetailedCuteBackend::recordCutePhaseIssue(const DecodedFifoEntry &entry)
+{
+    if (isALoad(entry)) {
+        ++cutePhaseStats.matrixCuteALoadIssue;
+    } else if (isBLoad(entry)) {
+        ++cutePhaseStats.matrixCuteBLoadIssue;
+    } else if (isCLoad(entry)) {
+        ++cutePhaseStats.matrixCuteCLoadIssue;
+    } else if (entry.isStore) {
+        ++cutePhaseStats.matrixCuteStoreIssue;
+    } else if (entry.isMma) {
+        ++cutePhaseStats.matrixCuteMmaIssue;
+    } else if (entry.isRelease) {
+        ++cutePhaseStats.matrixCuteReleaseIssue;
+    }
+}
+
+void
+DetailedCuteBackend::recordCutePhaseCompletion(const TaskEvent &event,
+                                               uint64_t latency)
+{
+    if (isALoad(event.entry)) {
+        ++cutePhaseStats.matrixCuteALoadFinish;
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCuteALoadIssueToFinishCycles,
+            cutePhaseStats.matrixCuteALoadIssueToFinishCyclesMax,
+            latency);
+    } else if (isBLoad(event.entry)) {
+        ++cutePhaseStats.matrixCuteBLoadFinish;
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCuteBLoadIssueToFinishCycles,
+            cutePhaseStats.matrixCuteBLoadIssueToFinishCyclesMax,
+            latency);
+    } else if (isCLoad(event.entry)) {
+        ++cutePhaseStats.matrixCuteCLoadFinish;
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCuteCLoadIssueToFinishCycles,
+            cutePhaseStats.matrixCuteCLoadIssueToFinishCyclesMax,
+            latency);
+    } else if (event.entry.isStore) {
+        ++cutePhaseStats.matrixCuteStoreFinish;
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCuteStoreIssueToFinishCycles,
+            cutePhaseStats.matrixCuteStoreIssueToFinishCyclesMax,
+            latency);
+    } else if (event.entry.isMma) {
+        ++cutePhaseStats.matrixCuteMmaFinish;
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCuteMmaIssueToFinishCycles,
+            cutePhaseStats.matrixCuteMmaIssueToFinishCyclesMax,
+            latency);
+    } else if (event.entry.isRelease) {
+        ++cutePhaseStats.matrixCuteReleaseFinish;
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCuteReleaseIssueToFinishCycles,
+            cutePhaseStats.matrixCuteReleaseIssueToFinishCyclesMax,
+            latency);
+    }
+}
+
 bool
 DetailedCuteBackend::useMemoryBudget()
 {
@@ -952,6 +1107,7 @@ DetailedCuteBackend::processTaskEvents()
             {
                 const uint64_t latency = finalizeCompletion(
                     event.completion, event.issueStep, activeTaskCount());
+                recordCutePhaseCompletion(event, latency);
                 traceTaskEvent(event);
                 DPRINTF(MatrixCuteTrace,
                         "microtask_finish [sn:%llu] unit=%u stage=done "

@@ -135,6 +135,11 @@ class CoherentXBar(BaseXBar):
     # Maximum routing table size for sanity checks
     max_routing_table_size = Param.Int(512, "Max. routing table size")
 
+    enable_matrix_response_lane = Param.Bool(
+        False, "Route Matrix load responses through a dedicated response lane")
+    matrix_response_max_per_cycle = Param.Unsigned(
+        1, "Max Matrix load responses accepted per cycle on the dedicated lane")
+
     # Determine how this crossbar handles packets where caches have
     # already committed to responding, by establishing if the crossbar
     # is the point of coherency or not.

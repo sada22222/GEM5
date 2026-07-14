@@ -234,6 +234,7 @@ class CPU : public BaseCPU
         PacketPtr buildStoreCleanInvalidPacket(const Request &request);
         PacketPtr buildStoreTimingPacket(const Request &request);
         void sendOrBlock(PacketPtr pkt);
+        void noteTimingRequestSent(PacketPtr pkt);
         void trySendBlocked();
 
         CPU *cpu = nullptr;

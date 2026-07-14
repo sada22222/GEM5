@@ -182,6 +182,8 @@ class BaseO3CPU(BaseCPU):
         True, "Expose and connect the matrix memory timing port")
     enableMatrixMlsQueue = Param.Bool(
         True, "Enable matrix memory virtual and replay queues")
+    matrixCZeroLoadLatency = Param.Unsigned(
+        256, "CUTE C zero-load CML occupancy cycles")
 
     wbWidth = Param.Unsigned(20, "Writeback width")
 

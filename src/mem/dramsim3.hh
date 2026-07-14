@@ -112,6 +112,8 @@ class DRAMsim3 : public AbstractMemory
      * Is the connected port waiting for a retry from us
      */
     bool retryReq;
+    Addr retryReqAddr;
+    bool retryReqIsWrite;
 
     /**
      * Are we waiting for a retry for sending a response.
@@ -159,6 +161,7 @@ class DRAMsim3 : public AbstractMemory
     boost::heap::priority_queue<std::pair<PacketPtr, Tick>, boost::heap::compare<sort_policy>> responseQueue;
 
 
+    unsigned int nbrOutstandingRequests() const;
     unsigned int nbrOutstanding() const;
 
     /**

@@ -143,6 +143,9 @@ def config_aligned_l2(options, system, l2_cache_class):
 
     system.tol2bus_list = [L1ToL2Bus(
         clk_domain=system.cpu_clk_domain) for i in range(options.num_cpus)]
+    for tol2bus in system.tol2bus_list:
+        tol2bus.enable_matrix_response_lane = True
+        tol2bus.matrix_response_max_per_cycle = 2
 
     for i in range(options.num_cpus):
         l2_wrapper = system.l2_wrappers[i]

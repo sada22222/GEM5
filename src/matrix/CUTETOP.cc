@@ -180,6 +180,36 @@ DetailedCuteBackend::CutePhaseStats::CutePhaseStats(statistics::Group *parent)
       ADD_STAT(matrixCuteALoadIssueToFinishCyclesMax,
                statistics::units::Cycle::get(),
                "Maximum CUTE ALoad issue-to-finish cycles"),
+      ADD_STAT(matrixCuteALoadIssueToLastReqCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE ALoad issue-to-last-request cycles"),
+      ADD_STAT(matrixCuteALoadIssueToLastReqCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE ALoad issue-to-last-request cycles"),
+      ADD_STAT(matrixCuteALoadLastReqToLastRespCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE ALoad last-request-to-last-response cycles"),
+      ADD_STAT(matrixCuteALoadLastReqToLastRespCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE ALoad last-request-to-last-response cycles"),
+      ADD_STAT(matrixCuteALoadLastReqToLastActualReqCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE ALoad last-adapter-request-to-last-actual-request cycles"),
+      ADD_STAT(matrixCuteALoadLastReqToLastActualReqCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE ALoad last-adapter-request-to-last-actual-request cycles"),
+      ADD_STAT(matrixCuteALoadLastActualReqToLastRespCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE ALoad last-actual-request-to-last-response cycles"),
+      ADD_STAT(matrixCuteALoadLastActualReqToLastRespCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE ALoad last-actual-request-to-last-response cycles"),
+      ADD_STAT(matrixCuteALoadLastRespToFinishCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE ALoad last-response-to-finish cycles"),
+      ADD_STAT(matrixCuteALoadLastRespToFinishCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE ALoad last-response-to-finish cycles"),
       ADD_STAT(matrixCuteBLoadIssue, statistics::units::Count::get(),
                "CUTE BLoad tasks issued"),
       ADD_STAT(matrixCuteBLoadFinish, statistics::units::Count::get(),
@@ -190,6 +220,36 @@ DetailedCuteBackend::CutePhaseStats::CutePhaseStats(statistics::Group *parent)
       ADD_STAT(matrixCuteBLoadIssueToFinishCyclesMax,
                statistics::units::Cycle::get(),
                "Maximum CUTE BLoad issue-to-finish cycles"),
+      ADD_STAT(matrixCuteBLoadIssueToLastReqCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE BLoad issue-to-last-request cycles"),
+      ADD_STAT(matrixCuteBLoadIssueToLastReqCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE BLoad issue-to-last-request cycles"),
+      ADD_STAT(matrixCuteBLoadLastReqToLastRespCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE BLoad last-request-to-last-response cycles"),
+      ADD_STAT(matrixCuteBLoadLastReqToLastRespCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE BLoad last-request-to-last-response cycles"),
+      ADD_STAT(matrixCuteBLoadLastReqToLastActualReqCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE BLoad last-adapter-request-to-last-actual-request cycles"),
+      ADD_STAT(matrixCuteBLoadLastReqToLastActualReqCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE BLoad last-adapter-request-to-last-actual-request cycles"),
+      ADD_STAT(matrixCuteBLoadLastActualReqToLastRespCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE BLoad last-actual-request-to-last-response cycles"),
+      ADD_STAT(matrixCuteBLoadLastActualReqToLastRespCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE BLoad last-actual-request-to-last-response cycles"),
+      ADD_STAT(matrixCuteBLoadLastRespToFinishCycles,
+               statistics::units::Cycle::get(),
+               "Total CUTE BLoad last-response-to-finish cycles"),
+      ADD_STAT(matrixCuteBLoadLastRespToFinishCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CUTE BLoad last-response-to-finish cycles"),
       ADD_STAT(matrixCuteCLoadIssue, statistics::units::Count::get(),
                "CUTE CLoad tasks issued"),
       ADD_STAT(matrixCuteCLoadFinish, statistics::units::Count::get(),
@@ -229,7 +289,204 @@ DetailedCuteBackend::CutePhaseStats::CutePhaseStats(statistics::Group *parent)
                "Total CUTE release issue-to-finish cycles"),
       ADD_STAT(matrixCuteReleaseIssueToFinishCyclesMax,
                statistics::units::Cycle::get(),
-               "Maximum CUTE release issue-to-finish cycles")
+               "Maximum CUTE release issue-to-finish cycles"),
+      ADD_STAT(matrixCmlLoadTaskStart, statistics::units::Count::get(),
+               "CML load-like tasks issued, including CLoad and zero-C"),
+      ADD_STAT(matrixCmlMemLoadTaskStart, statistics::units::Count::get(),
+               "CML memory CLoad tasks issued"),
+      ADD_STAT(matrixCmlZeroLoadTaskStart, statistics::units::Count::get(),
+               "CML zero-C tasks issued"),
+      ADD_STAT(matrixCmlLoadReqFire, statistics::units::Count::get(),
+               "CML load requests accepted by the timing memory adapter"),
+      ADD_STAT(matrixCmlLoadRespFire, statistics::units::Count::get(),
+               "CML load responses accepted by CUTE"),
+      ADD_STAT(matrixCmlLoadTaskFinish, statistics::units::Count::get(),
+               "CML load-like tasks finished"),
+      ADD_STAT(matrixCmlMemLoadTaskFinish, statistics::units::Count::get(),
+               "CML memory CLoad tasks finished"),
+      ADD_STAT(matrixCmlZeroLoadTaskFinish, statistics::units::Count::get(),
+               "CML zero-C tasks finished"),
+      ADD_STAT(matrixCmlMemLoadReqValid, statistics::units::Cycle::get(),
+               "Cycles where the LocalMMU has a pending CML load request"),
+      ADD_STAT(matrixCmlMemLoadReqBlocked, statistics::units::Cycle::get(),
+               "Cycles where a pending CML load request does not fire"),
+      ADD_STAT(matrixCmlMemLoadReqBlockedSource,
+               statistics::units::Cycle::get(),
+               "Pending CML load request blocked by CUTE/LocalMMU source "
+               "arbitration or source availability"),
+      ADD_STAT(matrixCmlMemLoadReqBlockedSourceFull,
+               statistics::units::Cycle::get(),
+               "Pending CML load request blocked by full LocalMMU external "
+               "sources"),
+      ADD_STAT(matrixCmlMemLoadReqBlockedSourceFullReadyResp,
+               statistics::units::Cycle::get(),
+               "CML load source-full blocked cycles where LocalMMU has ready "
+               "responses not yet handed to CUTE"),
+      ADD_STAT(matrixCmlMemLoadReqBlockedSourceFullPendingResp,
+               statistics::units::Cycle::get(),
+               "CML load source-full blocked cycles where CUTE has pending "
+               "LocalMMU responses not yet serviced"),
+      ADD_STAT(matrixCmlMemLoadReqBlockedSourceFullCompleted,
+               statistics::units::Cycle::get(),
+               "CML load source-full blocked cycles with completed "
+               "outstanding sources awaiting release"),
+      ADD_STAT(matrixCmlMemLoadReqBlockedSourceFullNoCompleted,
+               statistics::units::Cycle::get(),
+               "CML load source-full blocked cycles with no completed "
+               "outstanding source"),
+      ADD_STAT(matrixCmlMemLoadReqBlockedSourceFullCmlLoadOutstanding,
+               statistics::units::Count::get(),
+               "Sum of CML-load outstanding entries over CML load "
+               "source-full blocked cycles"),
+      ADD_STAT(matrixCmlMemLoadReqBlockedSourceArb,
+               statistics::units::Cycle::get(),
+               "Pending CML load request blocked because another LocalMMU "
+               "client fired"),
+      ADD_STAT(matrixCmlMemLoadReqBlockedLlc, statistics::units::Cycle::get(),
+               "Pending CML load request blocked by the timing memory "
+               "adapter"),
+      ADD_STAT(matrixCmlLoadRespBlocked, statistics::units::Count::get(),
+               "CML load response service attempts blocked inside CUTE"),
+      ADD_STAT(matrixCmlLoadRespBlockedFillTableFull,
+               statistics::units::Count::get(),
+               "CML load response service blocked by a full Matrix L2 fill "
+               "table"),
+      ADD_STAT(matrixCmlLoadRespBlockedFillBankFifoFull,
+               statistics::units::Count::get(),
+               "CML load response service blocked by a full Matrix L2 fill "
+               "bank FIFO"),
+      ADD_STAT(matrixCmlLoadSourceResp, statistics::units::Count::get(),
+               "CML load LocalMMU sources completed by timing memory "
+               "responses"),
+      ADD_STAT(matrixCmlLoadSourceRelease, statistics::units::Count::get(),
+               "CML load LocalMMU sources released after CUTE response "
+               "service"),
+      ADD_STAT(matrixCmlLoadSourceIssueToRespCycles,
+               statistics::units::Cycle::get(),
+               "Total CML load LocalMMU source issue-to-response cycles"),
+      ADD_STAT(matrixCmlLoadSourceIssueToRespCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CML load LocalMMU source issue-to-response cycles"),
+      ADD_STAT(matrixCmlLoadSourceRespToReleaseCycles,
+               statistics::units::Cycle::get(),
+               "Total CML load LocalMMU source response-to-release cycles"),
+      ADD_STAT(matrixCmlLoadSourceRespToReleaseCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CML load LocalMMU source response-to-release cycles"),
+      ADD_STAT(matrixCmlLoadSourceIssueToReleaseCycles,
+               statistics::units::Cycle::get(),
+               "Total CML load LocalMMU source issue-to-release cycles"),
+      ADD_STAT(matrixCmlLoadSourceIssueToReleaseCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CML load LocalMMU source issue-to-release cycles"),
+      ADD_STAT(matrixLocalMmuOutstandingMax,
+               statistics::units::Count::get(),
+               "Maximum LocalMMU external source occupancy observed by "
+               "CUTE"),
+      ADD_STAT(matrixLocalMmuOutstandingCmlLoadMax,
+               statistics::units::Count::get(),
+               "Maximum LocalMMU CML-load external source occupancy observed "
+               "by CUTE"),
+      ADD_STAT(matrixLocalMmuOutstandingFullCycles,
+               statistics::units::Cycle::get(),
+               "CUTE cycles where LocalMMU external source occupancy is "
+               "full"),
+      ADD_STAT(matrixL2FillTableReservedMax,
+               statistics::units::Count::get(),
+               "Maximum Matrix L2 fill table entries reserved"),
+      ADD_STAT(matrixL2FillBankFifoOccupancyMax,
+               statistics::units::Count::get(),
+               "Maximum Matrix L2 per-bank fill FIFO occupancy"),
+      ADD_STAT(matrixL2FillAcceptedResponses,
+               statistics::units::Count::get(),
+               "Matrix L2 fill responses accepted into the fill table"),
+      ADD_STAT(matrixL2FillAcceptedChunks,
+               statistics::units::Count::get(),
+               "Matrix L2 fill chunks accepted into the fill table"),
+      ADD_STAT(matrixL2FillDrainCycles,
+               statistics::units::Cycle::get(),
+               "CUTE cycles with at least one Matrix L2 fill chunk drained"),
+      ADD_STAT(matrixL2FillDrainChunks,
+               statistics::units::Count::get(),
+               "Matrix L2 fill chunks drained into matrix registers"),
+      ADD_STAT(matrixL2FillDrainChunksPerCycleMax,
+               statistics::units::Count::get(),
+               "Maximum Matrix L2 fill chunks drained in one CUTE cycle"),
+      ADD_STAT(matrixCmlLoadStartToLastReqCycles,
+               statistics::units::Cycle::get(),
+               "Total CML load issue-to-last-request-fire cycles"),
+      ADD_STAT(matrixCmlLoadStartToLastReqCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CML load issue-to-last-request-fire cycles"),
+      ADD_STAT(matrixCmlLoadStartToLastRespCycles,
+               statistics::units::Cycle::get(),
+               "Total CML load issue-to-last-response-fire cycles"),
+      ADD_STAT(matrixCmlLoadStartToLastRespCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CML load issue-to-last-response-fire cycles"),
+      ADD_STAT(matrixCmlLoadStartToFinishCycles,
+               statistics::units::Cycle::get(),
+               "Total CML load issue-to-finish cycles"),
+      ADD_STAT(matrixCmlLoadStartToFinishCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum CML load issue-to-finish cycles"),
+      ADD_STAT(matrixCmlStoreTaskStart, statistics::units::Count::get(),
+               "CML StoreC tasks issued"),
+      ADD_STAT(matrixCmlStoreWriteFire, statistics::units::Count::get(),
+               "CML StoreC write requests accepted by the timing memory "
+               "adapter"),
+      ADD_STAT(matrixCmlStoreRespFire, statistics::units::Count::get(),
+               "CML StoreC responses accepted by CUTE"),
+      ADD_STAT(matrixCmlStoreTaskFinish, statistics::units::Count::get(),
+               "CML StoreC tasks finished"),
+      ADD_STAT(matrixCmlStoreStartToFirstWriteCycles,
+               statistics::units::Cycle::get(),
+               "Total StoreC issue-to-first-write-fire cycles"),
+      ADD_STAT(matrixCmlStoreStartToFirstWriteCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum StoreC issue-to-first-write-fire cycles"),
+      ADD_STAT(matrixCmlStoreStartToLastWriteCycles,
+               statistics::units::Cycle::get(),
+               "Total StoreC issue-to-last-write-fire cycles"),
+      ADD_STAT(matrixCmlStoreStartToLastWriteCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum StoreC issue-to-last-write-fire cycles"),
+      ADD_STAT(matrixCmlStoreStartToFirstRespCycles,
+               statistics::units::Cycle::get(),
+               "Total StoreC issue-to-first-response-fire cycles"),
+      ADD_STAT(matrixCmlStoreStartToFirstRespCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum StoreC issue-to-first-response-fire cycles"),
+      ADD_STAT(matrixCmlStoreStartToLastRespCycles,
+               statistics::units::Cycle::get(),
+               "Total StoreC issue-to-last-response-fire cycles"),
+      ADD_STAT(matrixCmlStoreStartToLastRespCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum StoreC issue-to-last-response-fire cycles"),
+      ADD_STAT(matrixCmlStoreStartToFinishCycles,
+               statistics::units::Cycle::get(),
+               "Total StoreC issue-to-finish cycles"),
+      ADD_STAT(matrixCmlStoreStartToFinishCyclesMax,
+               statistics::units::Cycle::get(),
+               "Maximum StoreC issue-to-finish cycles"),
+      ADD_STAT(matrixCuteALoadFillTableFullBlocked,
+               statistics::units::Count::get(),
+               "CUTE ALoad responses blocked by full matrix fill table"),
+      ADD_STAT(matrixCuteBLoadFillTableFullBlocked,
+               statistics::units::Count::get(),
+               "CUTE BLoad responses blocked by full matrix fill table"),
+      ADD_STAT(matrixCuteALoadFillBankFifoFullBlocked,
+               statistics::units::Count::get(),
+               "CUTE ALoad responses blocked by full fill bank FIFO"),
+      ADD_STAT(matrixCuteBLoadFillBankFifoFullBlocked,
+               statistics::units::Count::get(),
+               "CUTE BLoad responses blocked by full fill bank FIFO"),
+      ADD_STAT(matrixCuteALoadMatrixRegWriteBlocked,
+               statistics::units::Count::get(),
+               "CUTE ALoad matrix register write attempts blocked"),
+      ADD_STAT(matrixCuteBLoadMatrixRegWriteBlocked,
+               statistics::units::Count::get(),
+               "CUTE BLoad matrix register write attempts blocked")
 {
 }
 
@@ -251,6 +508,18 @@ DetailedCuteBackend::isCLoad(const DecodedFifoEntry &entry) const
     return entry.isLoad && entry.request.lsu.isAcc;
 }
 
+bool
+DetailedCuteBackend::isCmlMemLoad(const DecodedFifoEntry &entry) const
+{
+    return isCLoad(entry);
+}
+
+bool
+DetailedCuteBackend::isCmlZeroLoad(const DecodedFifoEntry &entry) const
+{
+    return entry.isZeroAcc;
+}
+
 void
 DetailedCuteBackend::recordCutePhaseLatency(statistics::Scalar &total,
                                             statistics::Scalar &maximum,
@@ -269,10 +538,16 @@ DetailedCuteBackend::recordCutePhaseIssue(const DecodedFifoEntry &entry)
         ++cutePhaseStats.matrixCuteALoadIssue;
     } else if (isBLoad(entry)) {
         ++cutePhaseStats.matrixCuteBLoadIssue;
-    } else if (isCLoad(entry)) {
+    } else if (isCmlMemLoad(entry)) {
         ++cutePhaseStats.matrixCuteCLoadIssue;
+        ++cutePhaseStats.matrixCmlLoadTaskStart;
+        ++cutePhaseStats.matrixCmlMemLoadTaskStart;
+    } else if (isCmlZeroLoad(entry)) {
+        ++cutePhaseStats.matrixCmlLoadTaskStart;
+        ++cutePhaseStats.matrixCmlZeroLoadTaskStart;
     } else if (entry.isStore) {
         ++cutePhaseStats.matrixCuteStoreIssue;
+        ++cutePhaseStats.matrixCmlStoreTaskStart;
     } else if (entry.isMma) {
         ++cutePhaseStats.matrixCuteMmaIssue;
     } else if (entry.isRelease) {
@@ -321,6 +596,331 @@ DetailedCuteBackend::recordCutePhaseCompletion(const TaskEvent &event,
             cutePhaseStats.matrixCuteReleaseIssueToFinishCyclesMax,
             latency);
     }
+}
+
+void
+DetailedCuteBackend::recordLoadPhaseBreakdown(const TaskSlot &task)
+{
+    if (!task.entry.isLoad || task.lastReqStep == 0 ||
+        task.lastRespStep == 0 || backendStep < task.lastRespStep ||
+        task.lastRespStep < task.lastReqStep ||
+        task.lastReqStep < task.issueStep) {
+        return;
+    }
+
+    const uint64_t issue_to_last_req = task.lastReqStep - task.issueStep;
+    const uint64_t last_req_to_last_resp =
+        task.lastRespStep - task.lastReqStep;
+    const uint64_t last_resp_to_finish = backendStep - task.lastRespStep;
+    const bool has_actual_req =
+        task.lastActualReqStep != 0 &&
+        task.lastActualReqStep >= task.lastReqStep &&
+        task.lastRespStep >= task.lastActualReqStep;
+    const uint64_t last_req_to_last_actual_req =
+        has_actual_req ? task.lastActualReqStep - task.lastReqStep : 0;
+    const uint64_t last_actual_req_to_last_resp =
+        has_actual_req ? task.lastRespStep - task.lastActualReqStep : 0;
+
+    if (isALoad(task.entry)) {
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCuteALoadIssueToLastReqCycles,
+            cutePhaseStats.matrixCuteALoadIssueToLastReqCyclesMax,
+            issue_to_last_req);
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCuteALoadLastReqToLastRespCycles,
+            cutePhaseStats.matrixCuteALoadLastReqToLastRespCyclesMax,
+            last_req_to_last_resp);
+        if (has_actual_req) {
+            recordCutePhaseLatency(
+                cutePhaseStats.matrixCuteALoadLastReqToLastActualReqCycles,
+                cutePhaseStats.matrixCuteALoadLastReqToLastActualReqCyclesMax,
+                last_req_to_last_actual_req);
+            recordCutePhaseLatency(
+                cutePhaseStats.matrixCuteALoadLastActualReqToLastRespCycles,
+                cutePhaseStats.matrixCuteALoadLastActualReqToLastRespCyclesMax,
+                last_actual_req_to_last_resp);
+        }
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCuteALoadLastRespToFinishCycles,
+            cutePhaseStats.matrixCuteALoadLastRespToFinishCyclesMax,
+            last_resp_to_finish);
+    } else if (isBLoad(task.entry)) {
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCuteBLoadIssueToLastReqCycles,
+            cutePhaseStats.matrixCuteBLoadIssueToLastReqCyclesMax,
+            issue_to_last_req);
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCuteBLoadLastReqToLastRespCycles,
+            cutePhaseStats.matrixCuteBLoadLastReqToLastRespCyclesMax,
+            last_req_to_last_resp);
+        if (has_actual_req) {
+            recordCutePhaseLatency(
+                cutePhaseStats.matrixCuteBLoadLastReqToLastActualReqCycles,
+                cutePhaseStats.matrixCuteBLoadLastReqToLastActualReqCyclesMax,
+                last_req_to_last_actual_req);
+            recordCutePhaseLatency(
+                cutePhaseStats.matrixCuteBLoadLastActualReqToLastRespCycles,
+                cutePhaseStats.matrixCuteBLoadLastActualReqToLastRespCyclesMax,
+                last_actual_req_to_last_resp);
+        }
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCuteBLoadLastRespToFinishCycles,
+            cutePhaseStats.matrixCuteBLoadLastRespToFinishCyclesMax,
+            last_resp_to_finish);
+    }
+}
+
+bool
+DetailedCuteBackend::noteTimingMemoryRequestSent(uint32_t source_id)
+{
+    const auto request = localMmu.outstandingRequest(source_id);
+    if (!request.has_value()) {
+        return false;
+    }
+
+    const auto note_slot = [&](std::optional<TaskSlot> &slot) {
+        if (!slot.has_value()) {
+            return false;
+        }
+        auto &task = slot.value();
+        if (!task.entry.isLoad ||
+            task.entry.request.seq != request->seq ||
+            localMmuClient(task) != request->client) {
+            return false;
+        }
+        task.lastActualReqStep = backendStep;
+        return true;
+    };
+
+    return note_slot(amlTask) || note_slot(bmlTask) || note_slot(cmlTask);
+}
+
+void
+DetailedCuteBackend::recordLocalMmuOutstanding()
+{
+    const auto occupancy = localMmu.outstandingCount();
+    const auto cml_load_occupancy =
+        localMmu.outstandingCount(LocalMmuModel::Client::CML, false);
+    if (occupancy > cutePhaseStats.matrixLocalMmuOutstandingMax.value()) {
+        cutePhaseStats.matrixLocalMmuOutstandingMax = occupancy;
+    }
+    if (cml_load_occupancy >
+        cutePhaseStats.matrixLocalMmuOutstandingCmlLoadMax.value()) {
+        cutePhaseStats.matrixLocalMmuOutstandingCmlLoadMax =
+            cml_load_occupancy;
+    }
+    if (localMmu.outstandingFull()) {
+        ++cutePhaseStats.matrixLocalMmuOutstandingFullCycles;
+    }
+}
+
+void
+DetailedCuteBackend::recordCmlSourceFullSnapshot()
+{
+    const auto cml_load_occupancy =
+        localMmu.outstandingCount(LocalMmuModel::Client::CML, false);
+    cutePhaseStats.matrixCmlMemLoadReqBlockedSourceFullCmlLoadOutstanding +=
+        cml_load_occupancy;
+
+    if (localMmu.readyCount() != 0) {
+        ++cutePhaseStats.matrixCmlMemLoadReqBlockedSourceFullReadyResp;
+    }
+    if (!pendingLocalMmuResponses.empty()) {
+        ++cutePhaseStats.matrixCmlMemLoadReqBlockedSourceFullPendingResp;
+    }
+
+    const auto completed = localMmu.completedOutstandingCount();
+    if (completed != 0) {
+        ++cutePhaseStats.matrixCmlMemLoadReqBlockedSourceFullCompleted;
+    } else {
+        ++cutePhaseStats.matrixCmlMemLoadReqBlockedSourceFullNoCompleted;
+    }
+}
+
+void
+DetailedCuteBackend::recordMatrixL2FillOccupancy()
+{
+    const auto reserved = matrixL2FillTable.reservedCount();
+    if (reserved > cutePhaseStats.matrixL2FillTableReservedMax.value()) {
+        cutePhaseStats.matrixL2FillTableReservedMax = reserved;
+    }
+
+    for (unsigned bank = 0; bank < MatrixRegResource::NumBanks; ++bank) {
+        const auto occupancy = matrixL2FillTable.bankFifoOccupancy(bank);
+        if (occupancy > cutePhaseStats.matrixL2FillBankFifoOccupancyMax.value()) {
+            cutePhaseStats.matrixL2FillBankFifoOccupancyMax = occupancy;
+        }
+    }
+}
+
+void
+DetailedCuteBackend::recordLocalMmuSourceIssue(
+    const LocalMmuModel::IssuedRequest &issued)
+{
+    if (issued.sourceId >= localMmuSourceTiming.size()) {
+        return;
+    }
+
+    auto &timing = localMmuSourceTiming[issued.sourceId];
+    timing.valid = true;
+    timing.isCmlLoad =
+        issued.request.client == LocalMmuModel::Client::CML &&
+        !issued.request.isStore;
+    timing.responseComplete = false;
+    timing.issueStep = backendStep;
+    timing.responseStep = 0;
+}
+
+void
+DetailedCuteBackend::recordLocalMmuSourceResponse(uint32_t source_id)
+{
+    if (source_id >= localMmuSourceTiming.size()) {
+        return;
+    }
+
+    auto &timing = localMmuSourceTiming[source_id];
+    if (!timing.valid || timing.responseComplete) {
+        return;
+    }
+
+    timing.responseComplete = true;
+    timing.responseStep = backendStep;
+    if (!timing.isCmlLoad) {
+        return;
+    }
+
+    ++cutePhaseStats.matrixCmlLoadSourceResp;
+    recordCutePhaseLatency(
+        cutePhaseStats.matrixCmlLoadSourceIssueToRespCycles,
+        cutePhaseStats.matrixCmlLoadSourceIssueToRespCyclesMax,
+        backendStep - timing.issueStep);
+}
+
+void
+DetailedCuteBackend::recordLocalMmuSourceRelease(uint32_t source_id)
+{
+    if (source_id >= localMmuSourceTiming.size()) {
+        return;
+    }
+
+    auto &timing = localMmuSourceTiming[source_id];
+    if (timing.valid && timing.isCmlLoad && timing.responseComplete) {
+        ++cutePhaseStats.matrixCmlLoadSourceRelease;
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCmlLoadSourceRespToReleaseCycles,
+            cutePhaseStats.matrixCmlLoadSourceRespToReleaseCyclesMax,
+            backendStep - timing.responseStep);
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCmlLoadSourceIssueToReleaseCycles,
+            cutePhaseStats.matrixCmlLoadSourceIssueToReleaseCyclesMax,
+            backendStep - timing.issueStep);
+    }
+
+    timing = LocalMmuSourceTiming{};
+}
+
+void
+DetailedCuteBackend::recordCmlRequestFire(
+    TaskSlot &task, const LocalMmuModel::IssuedRequest &issued)
+{
+    if (issued.request.client != LocalMmuModel::Client::CML) {
+        return;
+    }
+
+    if (issued.request.isStore) {
+        ++cutePhaseStats.matrixCmlStoreWriteFire;
+    } else {
+        ++cutePhaseStats.matrixCmlLoadReqFire;
+    }
+
+    if (!task.cmlFirstReqStepValid) {
+        task.cmlFirstReqStepValid = true;
+        task.cmlFirstReqStep = backendStep;
+    }
+    task.cmlLastReqStep = backendStep;
+}
+
+void
+DetailedCuteBackend::recordCmlResponseFire(
+    TaskSlot &task, const LocalMmuModel::Response &response)
+{
+    if (response.client != LocalMmuModel::Client::CML) {
+        return;
+    }
+
+    if (response.isStore) {
+        ++cutePhaseStats.matrixCmlStoreRespFire;
+    } else {
+        ++cutePhaseStats.matrixCmlLoadRespFire;
+    }
+
+    if (!task.cmlFirstRespStepValid) {
+        task.cmlFirstRespStepValid = true;
+        task.cmlFirstRespStep = backendStep;
+    }
+    task.cmlLastRespStep = backendStep;
+}
+
+void
+DetailedCuteBackend::recordCmlTaskFinish(const TaskSlot &task)
+{
+    const auto &entry = task.entry;
+    if (isCmlMemLoad(entry) || isCmlZeroLoad(entry)) {
+        ++cutePhaseStats.matrixCmlLoadTaskFinish;
+        if (isCmlMemLoad(entry)) {
+            ++cutePhaseStats.matrixCmlMemLoadTaskFinish;
+        } else {
+            ++cutePhaseStats.matrixCmlZeroLoadTaskFinish;
+        }
+
+        if (task.cmlFirstReqStepValid) {
+            recordCutePhaseLatency(
+                cutePhaseStats.matrixCmlLoadStartToLastReqCycles,
+                cutePhaseStats.matrixCmlLoadStartToLastReqCyclesMax,
+                task.cmlLastReqStep - task.issueStep);
+        }
+        if (task.cmlFirstRespStepValid) {
+            recordCutePhaseLatency(
+                cutePhaseStats.matrixCmlLoadStartToLastRespCycles,
+                cutePhaseStats.matrixCmlLoadStartToLastRespCyclesMax,
+                task.cmlLastRespStep - task.issueStep);
+        }
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCmlLoadStartToFinishCycles,
+            cutePhaseStats.matrixCmlLoadStartToFinishCyclesMax,
+            backendStep - task.issueStep);
+        return;
+    }
+
+    if (!entry.isStore) {
+        return;
+    }
+
+    ++cutePhaseStats.matrixCmlStoreTaskFinish;
+    if (task.cmlFirstReqStepValid) {
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCmlStoreStartToFirstWriteCycles,
+            cutePhaseStats.matrixCmlStoreStartToFirstWriteCyclesMax,
+            task.cmlFirstReqStep - task.issueStep);
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCmlStoreStartToLastWriteCycles,
+            cutePhaseStats.matrixCmlStoreStartToLastWriteCyclesMax,
+            task.cmlLastReqStep - task.issueStep);
+    }
+    if (task.cmlFirstRespStepValid) {
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCmlStoreStartToFirstRespCycles,
+            cutePhaseStats.matrixCmlStoreStartToFirstRespCyclesMax,
+            task.cmlFirstRespStep - task.issueStep);
+        recordCutePhaseLatency(
+            cutePhaseStats.matrixCmlStoreStartToLastRespCycles,
+            cutePhaseStats.matrixCmlStoreStartToLastRespCyclesMax,
+            task.cmlLastRespStep - task.issueStep);
+    }
+    recordCutePhaseLatency(
+        cutePhaseStats.matrixCmlStoreStartToFinishCycles,
+        cutePhaseStats.matrixCmlStoreStartToFinishCyclesMax,
+        backendStep - task.issueStep);
 }
 
 bool
@@ -376,6 +976,19 @@ DetailedCuteBackend::executeTaskSlot(const TaskSlot &task)
 
     assert(entry.isRelease);
     return execRelease(entry.request.seq, entry.request.release);
+}
+
+bool
+DetailedCuteBackend::advanceZeroAccDelay(TaskSlot &task)
+{
+    assert(task.entry.isZeroAcc);
+    if (task.zeroCyclesRemaining > 1) {
+        --task.zeroCyclesRemaining;
+        return false;
+    }
+
+    task.zeroCyclesRemaining = 0;
+    return true;
 }
 
 CuteCompletion
@@ -621,9 +1234,36 @@ DetailedCuteBackend::issueLocalMmuTimingRequest()
         return;
     }
 
+    recordLocalMmuOutstanding();
+
+    const bool cml_load_valid =
+        localMmu.hasPendingMatching(LocalMmuModel::Client::CML, false);
+    if (cml_load_valid) {
+        ++cutePhaseStats.matrixCmlMemLoadReqValid;
+    }
+
     LocalMmuModel::IssuedRequest issued;
     if (!localMmu.issueExternal(backendStep, issued)) {
+        if (cml_load_valid) {
+            ++cutePhaseStats.matrixCmlMemLoadReqBlocked;
+            ++cutePhaseStats.matrixCmlMemLoadReqBlockedSource;
+            if (localMmu.outstandingFull()) {
+                ++cutePhaseStats.matrixCmlMemLoadReqBlockedSourceFull;
+                recordCmlSourceFullSnapshot();
+            } else {
+                ++cutePhaseStats.matrixCmlMemLoadReqBlockedSourceArb;
+            }
+        }
         return;
+    }
+
+    const bool issued_cml_load =
+        issued.request.client == LocalMmuModel::Client::CML &&
+        !issued.request.isStore;
+    if (cml_load_valid && !issued_cml_load) {
+        ++cutePhaseStats.matrixCmlMemLoadReqBlocked;
+        ++cutePhaseStats.matrixCmlMemLoadReqBlockedSource;
+        ++cutePhaseStats.matrixCmlMemLoadReqBlockedSourceArb;
     }
 
     MatrixTimingMemoryAdapter::Request request;
@@ -631,6 +1271,7 @@ DetailedCuteBackend::issueLocalMmuTimingRequest()
     request.sourceId = issued.sourceId;
     request.matrixKey = matrixL2KeyBits(MatrixL2Key::None);
 
+    TaskSlot *attached_task = nullptr;
     auto attach_address = [&](std::optional<TaskSlot> &slot) {
         if (!slot.has_value()) {
             return false;
@@ -672,6 +1313,7 @@ DetailedCuteBackend::issueLocalMmuTimingRequest()
         if (desc.tc) {
             request.contextId = desc.tc->contextId();
         }
+        attached_task = &task;
         return true;
     };
 
@@ -684,7 +1326,33 @@ DetailedCuteBackend::issueLocalMmuTimingRequest()
     }
 
     if (!timingMemory->sendTimingRequest(request)) {
+        if (issued_cml_load) {
+            ++cutePhaseStats.matrixCmlMemLoadReqBlocked;
+            ++cutePhaseStats.matrixCmlMemLoadReqBlockedLlc;
+        }
         return;
+    }
+
+    recordLocalMmuSourceIssue(issued);
+    if (attached_task != nullptr) {
+        recordCmlRequestFire(*attached_task, issued);
+    }
+
+    const auto note_last_req = [&](std::optional<TaskSlot> &slot) {
+        if (!slot.has_value()) {
+            return false;
+        }
+        auto &task = slot.value();
+        if (!task.entry.isLoad ||
+            task.entry.request.seq != issued.request.seq ||
+            localMmuClient(task) != issued.request.client) {
+            return false;
+        }
+        task.lastReqStep = backendStep;
+        return true;
+    };
+    if (!note_last_req(amlTask) && !note_last_req(bmlTask)) {
+        note_last_req(cmlTask);
     }
 
     DPRINTF(MatrixCuteTrace,
@@ -813,6 +1481,23 @@ DetailedCuteBackend::noteLsuMatrixRegWriteDrain(
            update_slot(cmlTask);
 }
 
+namespace
+{
+
+bool
+isAmlClient(LocalMmuModel::Client client)
+{
+    return client == LocalMmuModel::Client::AML;
+}
+
+bool
+isBmlClient(LocalMmuModel::Client client)
+{
+    return client == LocalMmuModel::Client::BML;
+}
+
+} // anonymous namespace
+
 void
 DetailedCuteBackend::serviceLsuMatrixRegWriteChunks()
 {
@@ -820,12 +1505,16 @@ DetailedCuteBackend::serviceLsuMatrixRegWriteChunks()
         return;
     }
 
+    unsigned drained_chunks = 0;
     const auto retire_candidate =
         [&](const MatrixL2FillTable::DrainCandidate &candidate) {
             const bool task_updated = noteLsuMatrixRegWriteDrain(candidate);
             assert(task_updated);
             const bool retired = matrixL2FillTable.retireDrain(candidate);
             assert(retired);
+            ++cutePhaseStats.matrixL2FillDrainChunks;
+            ++drained_chunks;
+            recordMatrixL2FillOccupancy();
         };
 
     for (unsigned bank = 0; bank < MatrixRegResource::NumBanks; ++bank) {
@@ -845,6 +1534,11 @@ DetailedCuteBackend::serviceLsuMatrixRegWriteChunks()
             const auto grants = matrixRegResource.arbitrate({write_request});
             assert(grants.size() == 1);
             if (!grants[0].granted) {
+                if (isAmlClient(candidate->client)) {
+                    ++cutePhaseStats.matrixCuteALoadMatrixRegWriteBlocked;
+                } else if (isBmlClient(candidate->client)) {
+                    ++cutePhaseStats.matrixCuteBLoadMatrixRegWriteBlocked;
+                }
                 DPRINTF(MatrixCuteTrace,
                         "matrix_reg_loader_write_stall [sn:%llu] client=%u "
                         "bank=%u physBank=%u entry=%u step=%llu.\n",
@@ -872,6 +1566,15 @@ DetailedCuteBackend::serviceLsuMatrixRegWriteChunks()
                 static_cast<unsigned long long>(
                     matrixL2FillTable.reservedCount()),
                 static_cast<unsigned long long>(backendStep));
+    }
+
+    if (drained_chunks != 0) {
+        ++cutePhaseStats.matrixL2FillDrainCycles;
+        if (drained_chunks >
+            cutePhaseStats.matrixL2FillDrainChunksPerCycleMax.value()) {
+            cutePhaseStats.matrixL2FillDrainChunksPerCycleMax =
+                drained_chunks;
+        }
     }
 }
 
@@ -1135,6 +1838,7 @@ DetailedCuteBackend::finishTaskSlot(std::optional<TaskSlot> &slot)
     assert(slot.has_value());
     auto &task = slot.value();
     const auto &entry = task.entry;
+    recordLoadPhaseBreakdown(task);
     const auto completion = entry.isLoad ?
         executeLoadWrite(task) :
         (entry.isStore ? executeStoreWrite(task) :
@@ -1144,6 +1848,7 @@ DetailedCuteBackend::finishTaskSlot(std::optional<TaskSlot> &slot)
         entry.isZeroAcc || entry.isZeroTr) {
         enqueueTaskEvent(task, TaskEventKind::WriteFinish, completion);
     }
+    recordCmlTaskFinish(task);
     enqueueTaskEvent(task, TaskEventKind::TerminalCompletion, completion);
     task.stage = TaskStage::TerminalPending;
 }
@@ -1464,6 +2169,9 @@ DetailedCuteBackend::advanceTaskSlot(std::optional<TaskSlot> &slot)
         break;
       case TaskStage::RegWrite:
       case TaskStage::WaitPendingStoreClear:
+        if (task.entry.isZeroAcc && !advanceZeroAccDelay(task)) {
+            break;
+        }
         finishTaskSlot(slot);
         break;
       case TaskStage::StorePending:
@@ -1486,7 +2194,9 @@ DetailedCuteBackend::releaseLocalMmuSource(
     const LocalMmuModel::Response &response)
 {
     if (useTimingMemory()) {
-        localMmu.releaseExternalSource(response.sourceId);
+        if (localMmu.releaseExternalSource(response.sourceId)) {
+            recordLocalMmuSourceRelease(response.sourceId);
+        }
     }
 }
 
@@ -1508,6 +2218,7 @@ DetailedCuteBackend::serviceBmlBypassResponse(
     const auto grants = matrixRegResource.arbitrate({write_request});
     assert(grants.size() == 1);
     if (!grants[0].granted) {
+        ++cutePhaseStats.matrixCuteBLoadMatrixRegWriteBlocked;
         DPRINTF(MatrixCuteTrace,
                 "bml_bypass_write_stall [sn:%llu] beat=%u bank=%u "
                 "entry=%u reason=%u step=%llu.\n",
@@ -1526,7 +2237,9 @@ DetailedCuteBackend::serviceBmlBypassResponse(
     }
 
     releaseLocalMmuSource(response);
+    recordCmlResponseFire(task, response);
     ++task.lsuResponsesReceived;
+    task.lastRespStep = backendStep;
     DPRINTF(MatrixCuteTrace,
             "bml_bypass_response [sn:%llu] source=%u bytes=%u chunks=%u "
             "step=%llu.\n",
@@ -1546,6 +2259,16 @@ DetailedCuteBackend::serviceFillTableResponse(
     const auto fill_request =
         fillTableRequestForResponse(response, fill_chunks);
     if (!matrixL2FillTable.canAccept(fill_request)) {
+        if (isAmlClient(response.client)) {
+            ++cutePhaseStats.matrixCuteALoadFillTableFullBlocked;
+        } else if (isBmlClient(response.client)) {
+            ++cutePhaseStats.matrixCuteBLoadFillTableFullBlocked;
+        }
+        if (response.client == LocalMmuModel::Client::CML &&
+            !response.isStore) {
+            ++cutePhaseStats.matrixCmlLoadRespBlocked;
+            ++cutePhaseStats.matrixCmlLoadRespBlockedFillTableFull;
+        }
         DPRINTF(MatrixCuteTrace,
                 "matrix_l2_fill_full [sn:%llu] client=%u beat=%u "
                 "source=%u reserved=%llu step=%llu.\n",
@@ -1559,6 +2282,16 @@ DetailedCuteBackend::serviceFillTableResponse(
         return LocalMmuResponseResult::Blocked;
     }
     if (!matrixL2FillTable.canAcceptResponse(fill_request)) {
+        if (isAmlClient(response.client)) {
+            ++cutePhaseStats.matrixCuteALoadFillBankFifoFullBlocked;
+        } else if (isBmlClient(response.client)) {
+            ++cutePhaseStats.matrixCuteBLoadFillBankFifoFullBlocked;
+        }
+        if (response.client == LocalMmuModel::Client::CML &&
+            !response.isStore) {
+            ++cutePhaseStats.matrixCmlLoadRespBlocked;
+            ++cutePhaseStats.matrixCmlLoadRespBlockedFillBankFifoFull;
+        }
         DPRINTF(MatrixCuteTrace,
                 "matrix_l2_fill_bank_fifo_full [sn:%llu] client=%u "
                 "beat=%u source=%u targetBank=%u occupancy=%llu "
@@ -1583,11 +2316,16 @@ DetailedCuteBackend::serviceFillTableResponse(
             CuteCompletionStatus::Unsupported);
         task.lsuPendingMatrixRegWriteChunks = 0;
         releaseLocalMmuSource(response);
+        recordCmlResponseFire(task, response);
         ++task.lsuResponsesReceived;
+        task.lastRespStep = backendStep;
         return LocalMmuResponseResult::Serviced;
     }
 
     releaseLocalMmuSource(response);
+    ++cutePhaseStats.matrixL2FillAcceptedResponses;
+    cutePhaseStats.matrixL2FillAcceptedChunks += fill_request.fillChunks;
+    recordMatrixL2FillOccupancy();
     DPRINTF(MatrixCuteTrace,
             "matrix_l2_fill_response [sn:%llu] source=%u slot=%u gen=%u "
             "bytes=%u chunks=%u reserved=%llu step=%llu.\n",
@@ -1607,6 +2345,7 @@ DetailedCuteBackend::LocalMmuResponseResult
 DetailedCuteBackend::finishLocalMmuStoreAck(
     TaskSlot &task, const LocalMmuModel::Response &response)
 {
+    recordCmlResponseFire(task, response);
     ++task.lsuResponsesReceived;
     releaseLocalMmuSource(response);
     traceLocalMmuResponse(task, response);
@@ -1645,7 +2384,9 @@ DetailedCuteBackend::serviceLocalMmuReadResponse(
                 CuteCompletionStatus::Unsupported);
             task.lsuPendingMatrixRegWriteChunks = 0;
             releaseLocalMmuSource(response);
+            recordCmlResponseFire(task, response);
             ++task.lsuResponsesReceived;
+            task.lastRespStep = backendStep;
             return LocalMmuResponseResult::Serviced;
         }
         pending.timingLoadRecorded = true;
@@ -1665,7 +2406,9 @@ DetailedCuteBackend::serviceLocalMmuReadResponse(
         }
     }
 
+    recordCmlResponseFire(task, response);
     ++task.lsuResponsesReceived;
+    task.lastRespStep = backendStep;
     const auto fill_chunk_count = useTimingMemory() ? fill_chunks : 0;
     task.lsuPendingMatrixRegWriteChunks += fill_chunk_count;
     traceLocalMmuResponse(task, response);
@@ -1742,6 +2485,7 @@ DetailedCuteBackend::completeTimingMemoryResponse(
         return false;
     }
 
+    recordLocalMmuSourceResponse(source_id);
     serviceLocalMmuResponses();
     return true;
 }

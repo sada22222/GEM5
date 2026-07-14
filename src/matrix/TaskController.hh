@@ -63,6 +63,11 @@ class MatrixBackend
         (void)size;
         return false;
     }
+    virtual bool noteTimingMemoryRequestSent(uint32_t source_id)
+    {
+        (void)source_id;
+        return false;
+    }
 };
 
 // Decoded FIFO normalizes request fields for issue gating and tracing.

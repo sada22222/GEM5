@@ -122,8 +122,17 @@ class LocalMmuModel
         uint32_t source_id, const uint8_t *data, uint32_t size);
     bool releaseExternalSource(uint32_t source_id);
     std::vector<Response> takeReadyResponses();
+    std::optional<Request> outstandingRequest(uint32_t source_id) const;
 
     size_t pendingCount() const;
+    bool hasPendingMatching(Client client, bool is_store) const;
+    size_t outstandingCount(Client client, bool is_store) const;
+    size_t completedOutstandingCount() const;
+    size_t completedOutstandingCount(Client client, bool is_store) const;
+    bool outstandingFull() const
+    {
+        return outstanding.size() >= config.maxOutstanding;
+    }
     size_t outstandingCount() const { return outstanding.size(); }
     size_t readyCount() const { return readyResponses.size(); }
     uint64_t issuedCount() const { return issued; }

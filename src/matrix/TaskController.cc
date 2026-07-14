@@ -62,6 +62,7 @@ DetailedCuteBackend::DetailedCuteBackend(
       matrixL2FillTable(MatrixL2FillTable::Config{
           timing_config.matrixL2FillTableEntries,
           timing_config.matrixL2FillBankFifoDepth}),
+      localMmuSourceTiming(timing_config.localMmuMaxOutstanding),
       cutePhaseStats(stats_parent)
 {
 }
@@ -191,12 +192,18 @@ DetailedCuteBackend::dispatchTask(const DecodedFifoEntry &entry)
     task.entry = entry;
     task.microTaskKind = microTaskKindForEntry(entry);
     task.issueStep = backendStep;
+    if (entry.isZeroAcc) {
+        task.zeroCyclesRemaining =
+            timingConfig.matrixCZeroLoadLatencyCycles;
+    }
 
     DPRINTF(MatrixCuteTrace,
-            "microtask_issue [sn:%llu] unit=%u stage=%u step=%llu.\n",
+            "microtask_issue [sn:%llu] unit=%u stage=%u "
+            "zeroCycles=%u step=%llu.\n",
             entry.request.seq,
             static_cast<unsigned>(task.microTaskKind),
             static_cast<unsigned>(task.stage),
+            task.zeroCyclesRemaining,
             static_cast<unsigned long long>(task.issueStep));
 
     switch (task.microTaskKind) {

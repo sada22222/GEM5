@@ -35,6 +35,7 @@
 #include <deque>
 #include <functional>
 #include <optional>
+#include <vector>
 
 #include "matrix/LocalMMUModel.hh"
 #include "matrix/MRegFile.hh"
@@ -81,6 +82,7 @@ class DetailedCuteBackend : public MatrixBackend
         unsigned matrixL2FillBankFifoDepth = 2;
         unsigned matrixReduceWidthBytes = MatrixRegResource::EntryBytes;
         unsigned matrixOutsideDataWidthBytes = 64;
+        unsigned matrixCZeroLoadLatencyCycles = 256;
         std::optional<bool> matrixBmlBypassFillTable = std::nullopt;
     };
 
@@ -175,6 +177,16 @@ class DetailedCuteBackend : public MatrixBackend
         MatrixTensor bufferedTensor = {};
         bool hasBufferedTensor = false;
         uint64_t issueStep = 0;
+        uint64_t lastReqStep = 0;
+        uint64_t lastActualReqStep = 0;
+        uint64_t lastRespStep = 0;
+        bool cmlFirstReqStepValid = false;
+        uint64_t cmlFirstReqStep = 0;
+        uint64_t cmlLastReqStep = 0;
+        bool cmlFirstRespStepValid = false;
+        uint64_t cmlFirstRespStep = 0;
+        uint64_t cmlLastRespStep = 0;
+        unsigned zeroCyclesRemaining = 0;
     };
 
     struct CutePhaseStats : public statistics::Group
@@ -185,10 +197,30 @@ class DetailedCuteBackend : public MatrixBackend
         statistics::Scalar matrixCuteALoadFinish;
         statistics::Scalar matrixCuteALoadIssueToFinishCycles;
         statistics::Scalar matrixCuteALoadIssueToFinishCyclesMax;
+        statistics::Scalar matrixCuteALoadIssueToLastReqCycles;
+        statistics::Scalar matrixCuteALoadIssueToLastReqCyclesMax;
+        statistics::Scalar matrixCuteALoadLastReqToLastRespCycles;
+        statistics::Scalar matrixCuteALoadLastReqToLastRespCyclesMax;
+        statistics::Scalar matrixCuteALoadLastReqToLastActualReqCycles;
+        statistics::Scalar matrixCuteALoadLastReqToLastActualReqCyclesMax;
+        statistics::Scalar matrixCuteALoadLastActualReqToLastRespCycles;
+        statistics::Scalar matrixCuteALoadLastActualReqToLastRespCyclesMax;
+        statistics::Scalar matrixCuteALoadLastRespToFinishCycles;
+        statistics::Scalar matrixCuteALoadLastRespToFinishCyclesMax;
         statistics::Scalar matrixCuteBLoadIssue;
         statistics::Scalar matrixCuteBLoadFinish;
         statistics::Scalar matrixCuteBLoadIssueToFinishCycles;
         statistics::Scalar matrixCuteBLoadIssueToFinishCyclesMax;
+        statistics::Scalar matrixCuteBLoadIssueToLastReqCycles;
+        statistics::Scalar matrixCuteBLoadIssueToLastReqCyclesMax;
+        statistics::Scalar matrixCuteBLoadLastReqToLastRespCycles;
+        statistics::Scalar matrixCuteBLoadLastReqToLastRespCyclesMax;
+        statistics::Scalar matrixCuteBLoadLastReqToLastActualReqCycles;
+        statistics::Scalar matrixCuteBLoadLastReqToLastActualReqCyclesMax;
+        statistics::Scalar matrixCuteBLoadLastActualReqToLastRespCycles;
+        statistics::Scalar matrixCuteBLoadLastActualReqToLastRespCyclesMax;
+        statistics::Scalar matrixCuteBLoadLastRespToFinishCycles;
+        statistics::Scalar matrixCuteBLoadLastRespToFinishCyclesMax;
         statistics::Scalar matrixCuteCLoadIssue;
         statistics::Scalar matrixCuteCLoadFinish;
         statistics::Scalar matrixCuteCLoadIssueToFinishCycles;
@@ -205,6 +237,73 @@ class DetailedCuteBackend : public MatrixBackend
         statistics::Scalar matrixCuteReleaseFinish;
         statistics::Scalar matrixCuteReleaseIssueToFinishCycles;
         statistics::Scalar matrixCuteReleaseIssueToFinishCyclesMax;
+        statistics::Scalar matrixCmlLoadTaskStart;
+        statistics::Scalar matrixCmlMemLoadTaskStart;
+        statistics::Scalar matrixCmlZeroLoadTaskStart;
+        statistics::Scalar matrixCmlLoadReqFire;
+        statistics::Scalar matrixCmlLoadRespFire;
+        statistics::Scalar matrixCmlLoadTaskFinish;
+        statistics::Scalar matrixCmlMemLoadTaskFinish;
+        statistics::Scalar matrixCmlZeroLoadTaskFinish;
+        statistics::Scalar matrixCmlMemLoadReqValid;
+        statistics::Scalar matrixCmlMemLoadReqBlocked;
+        statistics::Scalar matrixCmlMemLoadReqBlockedSource;
+        statistics::Scalar matrixCmlMemLoadReqBlockedSourceFull;
+        statistics::Scalar matrixCmlMemLoadReqBlockedSourceFullReadyResp;
+        statistics::Scalar matrixCmlMemLoadReqBlockedSourceFullPendingResp;
+        statistics::Scalar matrixCmlMemLoadReqBlockedSourceFullCompleted;
+        statistics::Scalar matrixCmlMemLoadReqBlockedSourceFullNoCompleted;
+        statistics::Scalar
+            matrixCmlMemLoadReqBlockedSourceFullCmlLoadOutstanding;
+        statistics::Scalar matrixCmlMemLoadReqBlockedSourceArb;
+        statistics::Scalar matrixCmlMemLoadReqBlockedLlc;
+        statistics::Scalar matrixCmlLoadRespBlocked;
+        statistics::Scalar matrixCmlLoadRespBlockedFillTableFull;
+        statistics::Scalar matrixCmlLoadRespBlockedFillBankFifoFull;
+        statistics::Scalar matrixCmlLoadSourceResp;
+        statistics::Scalar matrixCmlLoadSourceRelease;
+        statistics::Scalar matrixCmlLoadSourceIssueToRespCycles;
+        statistics::Scalar matrixCmlLoadSourceIssueToRespCyclesMax;
+        statistics::Scalar matrixCmlLoadSourceRespToReleaseCycles;
+        statistics::Scalar matrixCmlLoadSourceRespToReleaseCyclesMax;
+        statistics::Scalar matrixCmlLoadSourceIssueToReleaseCycles;
+        statistics::Scalar matrixCmlLoadSourceIssueToReleaseCyclesMax;
+        statistics::Scalar matrixLocalMmuOutstandingMax;
+        statistics::Scalar matrixLocalMmuOutstandingCmlLoadMax;
+        statistics::Scalar matrixLocalMmuOutstandingFullCycles;
+        statistics::Scalar matrixL2FillTableReservedMax;
+        statistics::Scalar matrixL2FillBankFifoOccupancyMax;
+        statistics::Scalar matrixL2FillAcceptedResponses;
+        statistics::Scalar matrixL2FillAcceptedChunks;
+        statistics::Scalar matrixL2FillDrainCycles;
+        statistics::Scalar matrixL2FillDrainChunks;
+        statistics::Scalar matrixL2FillDrainChunksPerCycleMax;
+        statistics::Scalar matrixCmlLoadStartToLastReqCycles;
+        statistics::Scalar matrixCmlLoadStartToLastReqCyclesMax;
+        statistics::Scalar matrixCmlLoadStartToLastRespCycles;
+        statistics::Scalar matrixCmlLoadStartToLastRespCyclesMax;
+        statistics::Scalar matrixCmlLoadStartToFinishCycles;
+        statistics::Scalar matrixCmlLoadStartToFinishCyclesMax;
+        statistics::Scalar matrixCmlStoreTaskStart;
+        statistics::Scalar matrixCmlStoreWriteFire;
+        statistics::Scalar matrixCmlStoreRespFire;
+        statistics::Scalar matrixCmlStoreTaskFinish;
+        statistics::Scalar matrixCmlStoreStartToFirstWriteCycles;
+        statistics::Scalar matrixCmlStoreStartToFirstWriteCyclesMax;
+        statistics::Scalar matrixCmlStoreStartToLastWriteCycles;
+        statistics::Scalar matrixCmlStoreStartToLastWriteCyclesMax;
+        statistics::Scalar matrixCmlStoreStartToFirstRespCycles;
+        statistics::Scalar matrixCmlStoreStartToFirstRespCyclesMax;
+        statistics::Scalar matrixCmlStoreStartToLastRespCycles;
+        statistics::Scalar matrixCmlStoreStartToLastRespCyclesMax;
+        statistics::Scalar matrixCmlStoreStartToFinishCycles;
+        statistics::Scalar matrixCmlStoreStartToFinishCyclesMax;
+        statistics::Scalar matrixCuteALoadFillTableFullBlocked;
+        statistics::Scalar matrixCuteBLoadFillTableFullBlocked;
+        statistics::Scalar matrixCuteALoadFillBankFifoFullBlocked;
+        statistics::Scalar matrixCuteBLoadFillBankFifoFullBlocked;
+        statistics::Scalar matrixCuteALoadMatrixRegWriteBlocked;
+        statistics::Scalar matrixCuteBLoadMatrixRegWriteBlocked;
     };
 
     struct ComputeTaskState
@@ -327,6 +426,7 @@ class DetailedCuteBackend : public MatrixBackend
     void processTaskEvents();
     void dispatchTask(const DecodedFifoEntry &entry);
     CuteCompletion executeTaskSlot(const TaskSlot &task);
+    bool advanceZeroAccDelay(TaskSlot &task);
     CuteCompletion executeLoadWrite(TaskSlot &task);
     CuteCompletion executeStoreWrite(const TaskSlot &task);
     CuteCompletion executeComputeWrite(ComputeTaskState &task);
@@ -350,17 +450,42 @@ class DetailedCuteBackend : public MatrixBackend
     bool isALoad(const DecodedFifoEntry &entry) const;
     bool isBLoad(const DecodedFifoEntry &entry) const;
     bool isCLoad(const DecodedFifoEntry &entry) const;
+    bool isCmlMemLoad(const DecodedFifoEntry &entry) const;
+    bool isCmlZeroLoad(const DecodedFifoEntry &entry) const;
     void recordCutePhaseIssue(const DecodedFifoEntry &entry);
     void recordCutePhaseCompletion(const TaskEvent &event, uint64_t latency);
     void recordCutePhaseLatency(statistics::Scalar &total,
                                 statistics::Scalar &maximum,
                                 uint64_t latency);
+    void recordLoadPhaseBreakdown(const TaskSlot &task);
+    void recordCmlRequestFire(TaskSlot &task,
+                              const LocalMmuModel::IssuedRequest &issued);
+    void recordCmlResponseFire(TaskSlot &task,
+                               const LocalMmuModel::Response &response);
+    void recordLocalMmuOutstanding();
+    void recordCmlSourceFullSnapshot();
+    void recordMatrixL2FillOccupancy();
+    void recordLocalMmuSourceIssue(
+        const LocalMmuModel::IssuedRequest &issued);
+    void recordLocalMmuSourceResponse(uint32_t source_id);
+    void recordLocalMmuSourceRelease(uint32_t source_id);
+    void recordCmlTaskFinish(const TaskSlot &task);
+    bool noteTimingMemoryRequestSent(uint32_t source_id) override;
     MicroTaskKind microTaskKindForEntry(const DecodedFifoEntry &entry) const;
     bool useMemoryBudget();
     MatrixBankKind destBank(const DecodedFifoEntry &entry) const;
     size_t activeTaskCount() const;
 
   private:
+    struct LocalMmuSourceTiming
+    {
+        bool valid = false;
+        bool isCmlLoad = false;
+        bool responseComplete = false;
+        uint64_t issueStep = 0;
+        uint64_t responseStep = 0;
+    };
+
     DecodedFifo fifo;
     MatrixRegFile regFile;
     DetailedCuteScoreboard scoreboard;
@@ -377,6 +502,7 @@ class DetailedCuteBackend : public MatrixBackend
     MatrixL2FillTable matrixL2FillTable;
     MatrixTimingMemoryAdapter *timingMemory = nullptr;
     std::deque<PendingLocalMmuResponse> pendingLocalMmuResponses;
+    std::vector<LocalMmuSourceTiming> localMmuSourceTiming;
     unsigned pendingStoreCount = 0;
     unsigned memoryBudget = 1;
     uint64_t backendStep = 0;

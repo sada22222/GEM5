@@ -65,6 +65,8 @@ CoherentXBar::CoherentXBar(const CoherentXBarParams &p)
       pointOfCoherency(p.point_of_coherency),
       pointOfUnification(p.point_of_unification),
       hintWakeUpAheadCycles(p.hint_wakeup_ahead_cycles),
+      enableMatrixResponseLane(p.enable_matrix_response_lane),
+      matrixResponseMaxPerCycle(p.matrix_response_max_per_cycle),
 
       ADD_STAT(snoops, statistics::units::Count::get(), "Total snoops"),
       ADD_STAT(snoopTraffic, statistics::units::Byte::get(), "Total snoop traffic"),
@@ -87,9 +89,18 @@ CoherentXBar::CoherentXBar(const CoherentXBarParams &p)
       ADD_STAT(matrixCLoadLowerReqPeerBlocked,
                statistics::units::Count::get(),
                "matrix CLoad lower requests rejected by coherent xbar "
-               "downstream peer")
+               "downstream peer"),
+      ADD_STAT(matrixLoadRespLanePackets, statistics::units::Count::get(),
+               "Matrix load responses routed through the dedicated response "
+               "lane"),
+      ADD_STAT(matrixLoadRespLaneBlocked, statistics::units::Count::get(),
+               "Matrix load responses blocked by the dedicated response "
+               "lane")
 {
     assert(hintWakeUpAheadCycles <= responseLatency);
+    fatal_if(enableMatrixResponseLane && matrixResponseMaxPerCycle == 0,
+             "CoherentXBar: matrix_response_max_per_cycle must be non-zero");
+
     // create the ports based on the size of the memory-side port and
     // CPU-side port vector ports, and the presence of the default port,
     // the ports are enumerated starting from zero
@@ -126,6 +137,10 @@ CoherentXBar::CoherentXBar(const CoherentXBarParams &p)
         cpuSidePorts.push_back(bp);
         respLayers.push_back(new RespLayer(*bp, *this,
                                            csprintf("respLayer%d", i)));
+        auto *matrix_resp_layer = new RespLayer(
+            *bp, *this, csprintf("matrixRespLayer%d", i));
+        matrix_resp_layer->setMaxRequestsPerCycle(matrixResponseMaxPerCycle);
+        matrixRespLayers.push_back(matrix_resp_layer);
         snoopRespPorts.push_back(new SnoopRespPort(*bp, *this));
     }
 
@@ -159,6 +174,8 @@ CoherentXBar::~CoherentXBar()
     for (auto l: reqLayers)
         delete l;
     for (auto l: respLayers)
+        delete l;
+    for (auto l: matrixRespLayers)
         delete l;
     for (auto l: snoopLayers)
         delete l;
@@ -201,6 +218,19 @@ CoherentXBar::isMatrixCLoadLowerRequest(const PacketPtr pkt) const
 
     const auto xs_metadata = pkt->req->getXsMetadata();
     return xs_metadata.matrixTask() && xs_metadata.matrixModify();
+}
+
+bool
+CoherentXBar::isMatrixLoadResponse(PacketPtr pkt) const
+{
+    if (!enableMatrixResponseLane || pkt == nullptr || !pkt->isResponse() ||
+        pkt->req == nullptr || !pkt->req->hasXsMetadata() ||
+        !pkt->hasData() || pkt->getSize() == 0) {
+        return false;
+    }
+
+    const auto xs_metadata = pkt->req->getXsMetadata();
+    return xs_metadata.matrixTask();
 }
 
 bool
@@ -547,14 +577,25 @@ CoherentXBar::recvTimingResp(PacketPtr pkt, PortID mem_side_port_id)
     const PortID cpu_side_port_id = route_lookup->second;
     assert(cpu_side_port_id != InvalidPortID);
     assert(cpu_side_port_id < respLayers.size());
+    assert(cpu_side_port_id < matrixRespLayers.size());
+
+    const bool matrix_load_resp = isMatrixLoadResponse(pkt);
+    RespLayer *resp_layer = matrix_load_resp ?
+        matrixRespLayers[cpu_side_port_id] : respLayers[cpu_side_port_id];
 
     // test if the crossbar should be considered occupied for the
     // current port
-    if (!respLayers[cpu_side_port_id]->tryTiming(src_port)) {
+    if (!resp_layer->tryTiming(src_port)) {
         DPRINTF(CoherentXBar, "%s: src %s packet %s BUSY\n", __func__,
                 src_port->name(), pkt->print());
         blockedRespCountByCmd[pkt->cmdToIndex()]++;
+        if (matrix_load_resp) {
+            matrixLoadRespLaneBlocked++;
+        }
         return false;
+    }
+    if (matrix_load_resp) {
+        matrixLoadRespLanePackets++;
     }
 
     DPRINTF(CoherentXBar, "%s: src %s packet %s\n", __func__,
@@ -596,7 +637,7 @@ CoherentXBar::recvTimingResp(PacketPtr pkt, PortID mem_side_port_id)
     routeTo.erase(route_lookup);
 
     DPRINTF(CoherentXBar, "%s: will holdin the resp layer until %d\n", __func__, packetFinishTime);
-    respLayers[cpu_side_port_id]->succeededTiming(packetFinishTime);
+    resp_layer->succeededTiming(packetFinishTime);
 
     // stats updates
     pktCount[cpu_side_port_id][mem_side_port_id]++;

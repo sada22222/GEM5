@@ -108,6 +108,51 @@ LocalMmuModel::pendingCount() const
     return count;
 }
 
+bool
+LocalMmuModel::hasPendingMatching(Client client, bool is_store) const
+{
+    const auto index = clientIndex(client);
+    assert(index < ClientCount);
+    return std::any_of(
+        pending[index].begin(), pending[index].end(),
+        [is_store](const Request &request) {
+            return request.isStore == is_store;
+        });
+}
+
+size_t
+LocalMmuModel::outstandingCount(Client client, bool is_store) const
+{
+    return std::count_if(
+        outstanding.begin(), outstanding.end(),
+        [client, is_store](const InFlight &in_flight) {
+            return in_flight.request.client == client &&
+                   in_flight.request.isStore == is_store;
+        });
+}
+
+size_t
+LocalMmuModel::completedOutstandingCount() const
+{
+    return std::count_if(
+        outstanding.begin(), outstanding.end(),
+        [](const InFlight &in_flight) {
+            return in_flight.responseComplete;
+        });
+}
+
+size_t
+LocalMmuModel::completedOutstandingCount(Client client, bool is_store) const
+{
+    return std::count_if(
+        outstanding.begin(), outstanding.end(),
+        [client, is_store](const InFlight &in_flight) {
+            return in_flight.responseComplete &&
+                   in_flight.request.client == client &&
+                   in_flight.request.isStore == is_store;
+        });
+}
+
 std::optional<size_t>
 LocalMmuModel::nextRequestIndex() const
 {
@@ -296,6 +341,20 @@ LocalMmuModel::takeReadyResponses()
         readyResponses.begin(), readyResponses.end());
     readyResponses.clear();
     return responses;
+}
+
+std::optional<LocalMmuModel::Request>
+LocalMmuModel::outstandingRequest(uint32_t source_id) const
+{
+    const auto it = std::find_if(
+        outstanding.begin(), outstanding.end(),
+        [source_id](const InFlight &in_flight) {
+            return in_flight.sourceId == source_id;
+        });
+    if (it == outstanding.end()) {
+        return std::nullopt;
+    }
+    return it->request;
 }
 
 MatrixL2FillTable::MatrixL2FillTable(Config config_)

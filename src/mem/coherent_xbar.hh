@@ -79,6 +79,7 @@ class CoherentXBar : public BaseXBar
      */
     std::vector<ReqLayer*> reqLayers;
     std::vector<RespLayer*> respLayers;
+    std::vector<RespLayer*> matrixRespLayers;
     std::vector<SnoopRespLayer*> snoopLayers;
 
     /**
@@ -317,6 +318,12 @@ class CoherentXBar : public BaseXBar
     /** How many Cycles to send Hint in advance with TimingResp.*/
     const Cycles hintWakeUpAheadCycles;
 
+    /** Use a dedicated Matrix load response lane instead of respLayers. */
+    const bool enableMatrixResponseLane;
+
+    /** Matrix load responses accepted per cycle by the dedicated lane. */
+    const unsigned matrixResponseMaxPerCycle;
+
     /**
      * Upstream caches need this packet until true is returned, so
      * hold it for deletion until a subsequent call
@@ -325,6 +332,7 @@ class CoherentXBar : public BaseXBar
 
     bool recvTimingReq(PacketPtr pkt, PortID cpu_side_port_id);
     bool recvTimingResp(PacketPtr pkt, PortID mem_side_port_id);
+    bool isMatrixLoadResponse(PacketPtr pkt) const;
     void recvTimingSnoopReq(PacketPtr pkt, PortID mem_side_port_id);
     bool recvTimingSnoopResp(PacketPtr pkt, PortID cpu_side_port_id);
     void recvReqRetry(PortID mem_side_port_id);
@@ -458,6 +466,8 @@ class CoherentXBar : public BaseXBar
     statistics::Scalar matrixCLoadLowerReqSent;
     statistics::Scalar matrixCLoadLowerReqLayerBlocked;
     statistics::Scalar matrixCLoadLowerReqPeerBlocked;
+    statistics::Scalar matrixLoadRespLanePackets;
+    statistics::Scalar matrixLoadRespLaneBlocked;
 
   public:
 

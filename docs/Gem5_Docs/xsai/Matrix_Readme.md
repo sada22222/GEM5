@@ -59,6 +59,39 @@ scons build/RISCV/gem5.opt --gold-linker -j64 --rvv-impl=simple
 
 因此，matrix + simple RVV 的基本流程是：先用 `--rvv-impl=simple` 构建，再用 O3 / XiangShan 配置运行，并在运行命令里加 `--enable-riscv-vector`。matrix 默认开启；RVV 需要编译期实现选择和运行期开关同时满足。
 
+### kmhv2.py 运行命令
+
+当前更推荐用 `configs/example/kmhv2.py` 跑 full-system / checkpoint 形态的 matrix workload。`kmhv2.py` 会调用通用 XiangShan FS 参数解析，并固定 `args.bp_type = 'DecoupledBPUWithBTB'`、`args.kmh_align = True`，因此 `config_aligned_l2()` 中的 matrix response lane 配置会随当前 dirty cache/xbar 修改一起生效。
+
+raw binary 形态使用 `--raw-cpt`：
+
+```bash
+./build/RISCV/gem5.opt \
+  --outdir=/tmp/gem5-kmhv2-matrix-abc-raw \
+  --debug-flags=MatrixCuteTrace \
+  --debug-file=matrix_cute.trace \
+  configs/example/kmhv2.py \
+  --raw-cpt \
+  --generic-rv-cpt=<matrix-raw-bin> \
+  --disable-difftest \
+  --enable-riscv-vector
+```
+
+GCPT / checkpoint slice 形态不要加 `--raw-cpt`：
+
+```bash
+./build/RISCV/gem5.opt \
+  --outdir=/tmp/gem5-kmhv2-matrix-abc-gcpt \
+  --debug-flags=MatrixCuteTrace \
+  --debug-file=matrix_cute.trace \
+  configs/example/kmhv2.py \
+  --generic-rv-cpt=<checkpoint.zstd> \
+  --disable-difftest \
+  --enable-riscv-vector
+```
+
+如果 payload 不含 RVV 指令，可以去掉 `--enable-riscv-vector`；如果需要 difftest，则不要使用 `--disable-difftest`，并确认 `--difftest-ref-so` 或对应 `GCB*_REF_SO` 环境变量与 workload 匹配。上面两条命令是运行入口模板，不表示本文档更新时已经重新跑过。
+
 ## 总体改动范围
 
 ### ISA / Decode
@@ -134,6 +167,19 @@ store 路径大致是：
 4. write 响应返回后，backend 才把对应 source ID 记为 store ack 并释放；store completion 和 release 都会等待 pending store ack 清空。
 5. store 数据不再通过 ack 之后的 `storeTile()` functional 写内存。最终写入何时命中、miss、进入 MSHR 或写回下层，由当前 gem5 cache hierarchy 决定；matrix backend 只维护 backend-visible 的 beat/source/completion 状态。
 
+### 当前 A/B/C load 与 cache/xbar dirty 补充
+
+更细的当前实现说明见 [Matrix ABC Load/Cache Current Implementation](Matrix_ABC_Cache_Current_Impl.md)。本节只概括 `/nfs/home/hujun/GEM5` 当前 `codex/matrix-src-only-pr-unified` dirty worktree 中的事实，不包含 `/tmp/gem5-matrix-l2-xs-l2-contract-20260706` 那套探索实现。
+
+- ALoad / BLoad / CLoad 现在由 `DetailedCuteBackend` 显式分类：ALoad 是非 accumulate、非 B 的 load；BLoad 是非 accumulate、B 的 load；CLoad 是 `isAcc` load，并归入 CML memory load。
+- CLoad 的 timing request 使用 `MatrixL2Key::MatrixModify`，其它 matrix load 使用 `Matrix`。zero-C 只归入 CML load-like 统计，使用 `matrixCZeroLoadLatency` 固定延迟（默认 256 cycles），不发 memory/cache request。
+- `lastReqStep` 记录 CUTE/LocalMMU adapter 接受 request 的时间；`MatrixMemPort::noteTimingRequestSent()` 在 `sendTimingReq()` 真正成功后回调 backend，记录 `lastActualReqStep`。这把 adapter 发出和 cache/xbar 实际接收拆开，方便观察 request-side backpressure。
+- `LocalMMUModel` 增加 pending / outstanding / completed source 查询接口，CUTE 用它拆分 CML load source 满、仲裁未发、timing memory 不接受、ready response 未 service、completed source 未 release 等堵塞原因。
+- Matrix L2 fill table 仍是 CUTE 内部 response fill 缓冲：默认 4 entries、per-bank FIFO depth 2；普通 64B response 按 32B chunk drain。A/B chunk 走 matrix register write 仲裁，C bank fill candidate 当前直接 retire。
+- BLoad 仍有可选 fill-table bypass；默认是否启用由 `matrixBmlBypassFillTable` 或 `matrixReduceWidthBytes >= matrixOutsideDataWidthBytes` 决定。
+- 当前没有修改 `src/mem/cache/*` 的 tag / data / MSHR 行为。cache/xbar 侧 dirty 修改是在 `L1ToL2Bus` / `CoherentXBar` 上增加 matrix response lane：`enable_matrix_response_lane=True`、`matrix_response_max_per_cycle=2`，命中条件是 response packet 带 XS metadata、has data、且 `matrixTask()` 为真。
+- `src/mem/dramsim3.cc/.hh` 的 dirty 修改把 DRAMSim3 request admission / retry 改为直接看 `wrapper.canAccept(addr, isWrite)`。它影响 memory-controller admission slot 语义，但不是 ABC fill/cache 主路径的一部分。
+
 ### MTE / MMA 原理
 
 MTE / MMA path 是 CUTE compute 的分段抽象模型。ADC / BDC / CDC 被显式建模。当前实现会在 compute read 阶段把本次 MMA 需要的 A/B/C matrix register 内容读入 backend task state，作为后续逐 beat timing/functional 更新的快照；这不是说硬件一次把大矩阵整体吞进 MTE，而是 gem5 backend 用 task-local snapshot 保存 architectural matrix register 数据，方便按 8x8 tile 和 K-group 推进。
@@ -199,11 +245,13 @@ MTE / MMA path 是 CUTE compute 的分段抽象模型。ADC / BDC / CDC 被显�
   - client round-robin issue。
   - standalone fixed configurable latency。
   - timing-memory mode 的 external issue / response completion。
+  - CML load source occupancy、completed source 和 pending request 拆分统计。
 - Matrix memory port：
   - `matrix_mem_port` 是普通 gem5 cached `RequestPort`。
   - load beat 发 `ReadReq`，从 `ReadResp` payload 拼回 matrix tensor。
   - store beat 按 line 先做 PoU clean+invalidate 维护，再发携带 data / byte enable 的 write；同 line clean 完成后后续 beat 可直接 write。
   - request 被下游拒绝时进入 blocked queue，并通过 `recvReqRetry()` 重发。
+  - `noteTimingMemoryRequestSent()` 区分 adapter request fire 和 gem5 timing port actual accept。
 - Matrix L2 fill table：
   - load response accept 时分配 bounded fill table entry，而不是 request issue 时提前占用。
   - fill table entry 使用独立 handle 管理后续 MatrixReg loader write chunk，source ID 在 response accept 或 BML bypass 完成后释放。
@@ -211,6 +259,7 @@ MTE / MMA path 是 CUTE compute 的分段抽象模型。ADC / BDC / CDC 被显�
   - chunk 数由 response byte size 和 32B MatrixReg entry size 计算，普通 64B response 为 2 chunks。
   - fill table full 或 target-bank FIFO full 时 response 会先停在 backend pending response queue，source ID 继续占用，直到后端可以接收。
   - BML 可选绕过 fill table 直接写 MatrixReg chunk；默认配置下该旁路关闭。
+  - C bank fill drain 当前直接 retire，不走 A/B loader write arbitration。
 - Register-bank 仲裁：
   - 8 bank。
   - 32B entry。
@@ -225,6 +274,13 @@ MTE / MMA path 是 CUTE compute 的分段抽象模型。ADC / BDC / CDC 被显�
   - FReduce tail。
   - MTE result FIFO depth 和 FIFO full stall。
   - CDC beat grant / tile-level writeback 的第一版 timing/state。
+- Coherent xbar matrix response lane：
+  - `config_aligned_l2()` 中的 `L1ToL2Bus` 默认打开 matrix response lane。
+  - matrix data response 可绕过普通 `respLayers`，走独立 `matrixRespLayers`，默认每周期最多 2 个 response。
+  - 新增 `matrixLoadRespLanePackets` / `matrixLoadRespLaneBlocked` 统计。
+- CML zero-C：
+  - `matrixCZeroLoadLatency` 默认 256 cycles。
+  - 只表达 CUTE/backend 内部 C 清零占用，不产生 memory traffic。
 - Trace：
   - 新增 `MatrixCuteTrace` debug flag。
   - 记录 backend submit、dependency、LocalMMU enqueue/issue/response、MatrixReg loader write grant/stall、CDC read/writeback 等关键事件。
@@ -237,6 +293,12 @@ MTE / MMA path 是 CUTE compute 的分段抽象模型。ADC / BDC / CDC 被显�
   - `matrix_mem_port` 通过普通 gem5 `RequestPort` 进入当前 cache hierarchy，能覆盖 `Packet`、`recvTimingResp` 和 request retry。
   - cache tag、hit/miss、MSHR、coherence、replacement 由通用 gem5 cache 配置决定，不是 matrix backend 内部的 RTL 对齐资源模型。
   - 尚未建模 CUTE / matrix 专用 TL source、L2 bank、专用 MSHR、source/channel 仲裁和 RTL matrix L2 refill protocol。
+- Coherent xbar matrix response lane 只是 response-layer 资源拆分：
+  - 它不改变 cache hit/miss、coherence、replacement 或 MSHR 语义。
+  - 它按 XS metadata 的 `matrixTask()` 区分 matrix data response，不区分 A/B/C，也不是 RTL 专用 L2 response protocol。
+- DRAMSim3 dirty admission 修改是 memory controller admission 语义修正：
+  - 当前 request admission / retry 看 `wrapper.canAccept(addr, isWrite)`，不再把未消费 response queue 反向计入 DRAMSim3 transaction slot。
+  - 这和 XSAI/DRAMSim3 wrapper 的 request admission 方向一致，但不覆盖 XSAI 的 `padding_time=66` 与 `cpu_freq/dram_freq` clock bridge。
 - Store 维护请求是当前 gem5 cache 集成策略：
   - store line 首次遇到时先发 `CLEAN | INVALIDATE | DST_POU` 维护请求，再发 data-carrying write，用于处理当前 cache model 下 dirty line / partial-line write 的正确性边界。
   - 已完成 clean 的 line 后续 beat 直接写；clean in-flight 的同 line beat 会排队等待。
@@ -248,7 +310,11 @@ MTE / MMA path 是 CUTE compute 的分段抽象模型。ADC / BDC / CDC 被显�
 - Source ID 复用目前是空闲 ID 分配，不是严格 RTL source ID round-robin reuse。
 - LSU fill table 还不是 RTL 等价：
   - 当前已建模 bounded fill table、per-bank FIFO、response accept 后 source release、fill handle drain、BML bypass 和 32B chunk。
+  - C bank fill drain 当前直接 retire；是否应该经过与 A/B 类似的物理 bank 写口或其它 C loader 控制，还需要 RTL 侧确认。
   - 还没有完整建模 RTL 的 Matrix_MN 物理 sub-bank 级 fill FIFO、C loader repeat fill 的全部控制状态和 response.ready 对 L2 channel 的逐拍反压。
+- CML zero-C 当前是固定延迟近似：
+  - 它不产生 memory/cache traffic，也不验证 cache/xbar/DRAMSim3 侧 request admission。
+  - 如需对齐 RTL C 清零资源，需要单独确认是否应占用 C bank、LocalMMU source、matrix L2 fill 或其它 backend 资源。
 - Register-bank 仲裁是抽象 bank/resource 模型：
   - 建模 8 bank、32B entry、A/B priority、C odd/even conflict。
   - 该仲裁模型不等于 `MRegFile` 的物理存储布局；`MRegFile` 仍是 logical A/B/C register 的 whole-tensor functional storage。

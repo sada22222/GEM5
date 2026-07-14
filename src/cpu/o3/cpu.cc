@@ -550,6 +550,7 @@ CPU::MatrixMemPort::sendOrBlock(PacketPtr pkt)
                 state ? state->sourceId : 0, pkt->getAddr(), pkt->getSize(),
                 static_cast<unsigned long long>(blockedPackets.size()));
     } else {
+        noteTimingRequestSent(pkt);
         auto *state = dynamic_cast<SenderState *>(pkt->senderState);
         DPRINTF(MatrixCuteTrace,
                 "matrix_mem_port_send source=%u store=%u paddr=%#llx "
@@ -559,6 +560,16 @@ CPU::MatrixMemPort::sendOrBlock(PacketPtr pkt)
                 pkt->getAddr(), pkt->getSize(),
                 state ? static_cast<unsigned long long>(state->byteMask) : 0);
     }
+}
+
+void
+CPU::MatrixMemPort::noteTimingRequestSent(PacketPtr pkt)
+{
+    auto *state = dynamic_cast<SenderState *>(pkt->senderState);
+    if (state == nullptr || cpu->matrixBackend == nullptr) {
+        return;
+    }
+    cpu->matrixBackend->noteTimingMemoryRequestSent(state->sourceId);
 }
 
 bool
@@ -663,6 +674,7 @@ CPU::MatrixMemPort::trySendBlocked()
         if (!sendTimingReq(pkt)) {
             return;
         }
+        noteTimingRequestSent(pkt);
         blockedPackets.pop_front();
         auto *state = dynamic_cast<SenderState *>(pkt->senderState);
         DPRINTF(MatrixCuteTrace,
@@ -778,10 +790,14 @@ CPU::CPU(const BaseO3CPUParams &params)
     enableMatrixMlsQueue = params.enableMatrixMlsQueue;
     if (enableMatrixBackend) {
         constexpr unsigned detailedCuteFifoDepth = 8;
+        matrix::DetailedCuteBackend::TimingConfig timing_config;
+        timing_config.matrixCZeroLoadLatencyCycles =
+            params.matrixCZeroLoadLatency;
         auto detailed_backend = std::make_unique<matrix::DetailedCuteBackend>(
             detailedCuteFifoDepth,
             matrix::MatrixRegFile::DefaultAbRegCount,
             matrix::MatrixRegFile::DefaultCRegCount,
+            timing_config,
             this);
         detailed_backend->setIssueCallback(
             [this](uint64_t seq) {
